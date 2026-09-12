@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "kind": "policy",
+  "id": "artifactory-docker-passthrough-2027-01",
+  "title": "Base images must be pulled from the internal Artifactory mirror and pinned by digest",
+  "status": "active",
+  "severity": "blocking",
+  "deadline": "2027-01-15",
+  "source": {
+    "type": "slack",
+    "ref": "C04PLATFORM/p1757600000000100",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757600000000100",
+    "captured_at": "2026-09-11T09:14:00Z",
+    "excerpt": "Heads up - effective Jan 15, the docker.io passthrough on our Artifactory proxy is shut off (SLSA L2 supply-chain requirement). All Dockerfiles and CI jobs must pull base images from artifactory.corp/docker-remote/. Anything still pointing at docker.io or public ECR will fail at build time. Also, unpinned tags like FROM ubuntu:latest are no longer permitted - pin by digest."
+  },
+  "rules": [
+    {
+      "id": "registry-redirect",
+      "description": "FROM must resolve through artifactory.corp/docker-remote/, not a public registry.",
+      "detect": {
+        "type": "file_pattern",
+        "globs": ["**/Dockerfile", "**/Dockerfile.*"],
+        "regex": "^FROM\\s+(?!artifactory\\.corp/)"
+      },
+      "autofix": {
+        "type": "prefix_rewrite",
+        "to": "artifactory.corp/docker-remote/"
+      },
+      "verify": "docker build --pull ."
+    },
+    {
+      "id": "digest-pinning",
+      "description": "Base images must be pinned by digest, not by a mutable tag.",
+      "detect": {
+        "type": "file_pattern",
+        "globs": ["**/Dockerfile", "**/Dockerfile.*"],
+        "regex": "^FROM\\s+\\S+:(latest|\\d+\\.\\d+[\\w.-]*)\\s*$"
+      },
+      "autofix": {
+        "type": "manual",
+        "instructions": "Resolve the tag to a digest with `docker buildx imagetools inspect <image>` and replace the tag with @sha256:<digest>."
+      }
+    }
+  ],
+  "confidence": 0.91,
+  "created_at": "2026-09-11T09:15:22Z",
+  "notes": "Compiled from a single announcement carrying two distinct obligations."
+}

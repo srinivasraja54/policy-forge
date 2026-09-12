@@ -1,0 +1,15 @@
+name: nightly-build
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to registry
+        run: docker login artifactory.corp -u "$USER" -p "$TOKEN"
+      - name: Build
+        run: docker build -t payments-api:nightly .

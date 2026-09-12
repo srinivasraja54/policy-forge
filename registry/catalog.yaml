@@ -1,0 +1,19 @@
+# Repo inventory. Ownership here drives escalation routing and the per-team brief.
+repos:
+  - name: payments-api
+    path: fixtures/repos/payments-api
+    team: payments
+    owners: ["@payments-oncall"]
+    tags: ["tier-1", "pci"]
+
+  - name: data-platform
+    path: fixtures/repos/data-platform
+    team: data
+    owners: ["@data-eng"]
+    tags: ["tier-2"]
+
+  - name: web-ui
+    path: fixtures/repos/web-ui
+    team: frontend
+    owners: ["@web-guild"]
+    tags: ["tier-2"]

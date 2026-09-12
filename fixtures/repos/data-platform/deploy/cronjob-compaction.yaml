@@ -1,0 +1,15 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: table-compaction
+spec:
+  schedule: "30 2 * * 6"
+  timeZone: "Etc/UTC"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: compactor
+              image: artifactory.corp/docker-remote/spark:3.5
+          restartPolicy: OnFailure

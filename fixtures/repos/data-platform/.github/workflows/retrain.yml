@@ -1,0 +1,12 @@
+name: weekly-retrain
+on:
+  schedule:
+    - cron: '0 4 * * 6'
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker pull artifactory.corp/docker-remote/cuda:12.2-base
+      - run: make retrain

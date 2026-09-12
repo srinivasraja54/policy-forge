@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "event",
+  "id": "artifactory-upgrade-2026-10-03",
+  "title": "Artifactory proxy unavailable for upgrade",
+  "status": "active",
+  "severity": "high",
+  "window": {
+    "start": "2026-10-03T02:00:00Z",
+    "end": "2026-10-03T06:00:00Z"
+  },
+  "actions": ["reschedule_cron", "notify_oncall"],
+  "source": {
+    "type": "maintenance",
+    "ref": "C04PLATFORM/p1757900000000200",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757900000000200",
+    "captured_at": "2026-09-12T08:02:00Z",
+    "excerpt": "Planned maintenance: on Saturday Oct 3, 02:00-06:00 UTC the Artifactory proxy will be unavailable while we upgrade. Artifact pulls and publishes will fail during this window."
+  },
+  "rules": [
+    {
+      "id": "jobs-in-window",
+      "description": "Scheduled jobs that depend on Artifactory and fire during the maintenance window.",
+      "detect": {
+        "type": "schedule_intersects",
+        "globs": [
+          ".github/workflows/*.yml",
+          ".github/workflows/*.yaml",
+          "**/cronjob*.yaml",
+          "**/cronjob*.yml"
+        ],
+        "depends_on_regex": "artifactory\\.corp"
+      },
+      "autofix": {
+        "type": "shift_schedule",
+        "by_hours": 6,
+        "revert_after": "2026-10-04T00:00:00Z"
+      }
+    }
+  ],
+  "confidence": 0.95,
+  "created_at": "2026-09-12T08:03:10Z"
+}
