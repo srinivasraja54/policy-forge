@@ -145,3 +145,75 @@ class TestScoping:
         assert evaluate_artifact(
             art, RepoTarget(name="payments-api", path=fixtures_dir / "payments-api")
         ) == []
+
+
+class TestPythonFallback:
+    """If ripgrep is unavailable on a runner, the fallback runs for the first time
+    in production unless it is tested here. These assert parity with rg, not merely
+    that the fallback does something."""
+
+    @pytest.fixture
+    def no_rg(self, monkeypatch):
+        from policyforge.detect import file_pattern
+
+        monkeypatch.setattr(file_pattern, "RG", None)
+
+    def test_fallback_finds_same_violations(self, reg, fixtures_dir, no_rg):
+        res = outcome_of(results_for(reg, POLICY, "payments-api", fixtures_dir),
+                         "registry-redirect")
+        assert res.outcome is Outcome.VIOLATING
+        assert {f.file for f in res.findings} == {
+            "Dockerfile", "services/ml-trainer/Dockerfile"
+        }
+
+    def test_fallback_agrees_with_ripgrep_on_clean_repo(self, reg, fixtures_dir, no_rg):
+        res = outcome_of(results_for(reg, POLICY, "web-ui", fixtures_dir),
+                         "registry-redirect")
+        assert res.outcome is Outcome.CLEAR
+
+    def test_fallback_reports_line_numbers(self, reg, fixtures_dir, no_rg):
+        res = outcome_of(results_for(reg, POLICY, "payments-api", fixtures_dir),
+                         "digest-pinning")
+        assert res.findings[0].line == 1
+
+
+class TestAbsentMode:
+    """`absent: true` inverts the rule -- violation is the *lack* of a match. This
+    is how "every Dockerfile must declare a non-root USER" is expressed."""
+
+    def _artifact(self, source_stub, absent: bool):
+        return Artifact(
+            kind="policy", id="require-user-directive", title="t", status="active",
+            source=source_stub,
+            rules=[{"id": "non-root", "description": "Dockerfiles must set USER",
+                    "detect": {"type": "file_pattern", "globs": ["**/Dockerfile"],
+                               "regex": r"^USER\s+\w+", "absent": absent}}],
+        )
+
+    def test_flags_files_missing_the_required_pattern(self, source_stub, fixtures_dir):
+        art = self._artifact(source_stub, absent=True)
+        res = evaluate_artifact(
+            art, RepoTarget(name="payments-api", path=fixtures_dir / "payments-api")
+        )[0]
+        assert res.outcome is Outcome.VIOLATING
+        assert {f.file for f in res.findings} == {
+            "Dockerfile", "services/ml-trainer/Dockerfile"
+        }
+        assert res.findings[0].detail == "required pattern not found"
+
+    def test_clear_when_every_file_has_the_pattern(self, source_stub, tmp_path):
+        (tmp_path / "Dockerfile").write_text("FROM scratch\nUSER appuser\n")
+        art = self._artifact(source_stub, absent=True)
+        res = evaluate_artifact(art, RepoTarget(name="ok", path=tmp_path))[0]
+        assert res.outcome is Outcome.CLEAR
+
+    def test_absent_is_the_inverse_of_present(self, source_stub, tmp_path):
+        (tmp_path / "Dockerfile").write_text("FROM scratch\nUSER appuser\n")
+        present = evaluate_artifact(
+            self._artifact(source_stub, absent=False),
+            RepoTarget(name="ok", path=tmp_path))[0]
+        absent = evaluate_artifact(
+            self._artifact(source_stub, absent=True),
+            RepoTarget(name="ok", path=tmp_path))[0]
+        assert present.outcome is Outcome.VIOLATING   # match found
+        assert absent.outcome is Outcome.CLEAR        # nothing missing

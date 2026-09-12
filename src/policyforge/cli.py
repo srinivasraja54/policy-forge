@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .detect import RepoTarget, evaluate_artifact
+from .detect import file_pattern
 from .detect.base import Outcome, RuleResult
 from .ledger import Ledger
 from .registry import Registry, RegistryError
@@ -115,6 +116,18 @@ def check(
 
     led = Ledger(ledger_path) if record else None
     run_id = led.start_run(registry_ref=str(registry), note="policyctl check") if led else None
+
+    # Which search backend ran is part of the result, not an implementation
+    # detail: the two are required to agree, and a silent switch should still be
+    # visible in a CI log if they ever diverge.
+    engine = file_pattern.backend()
+    console.print(
+        f"[dim]{len(enforceable)} artifact(s) x {len(targets)} repo(s) "
+        f"· search backend: {engine}"
+        + ("  [yellow](install ripgrep for large repos)[/yellow]"
+           if engine == "python" else "")
+        + "[/dim]"
+    )
 
     all_results: list[RuleResult] = []
     blocking_hits: list[tuple[Artifact, RuleResult]] = []

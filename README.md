@@ -4,7 +4,7 @@
 
 Platform teams announce governance in prose — a Slack post, a postmortem, a maintenance notice. Downstream teams then read that prose and manually work out whether it affects their repos. That translation step is the expensive, unautomated part, and it is the only part this project asks a language model to do.
 
-Everything after it is `ripgrep` and calendar arithmetic.
+Everything after it is pattern matching and calendar arithmetic — no model calls at all.
 
 ---
 
@@ -17,7 +17,7 @@ Slack announcement  ─┐
 Postmortem          ─┼─► compile (LLM, once) ─► policy artifact ─► human review (PR)
 Maintenance notice  ─┘                              │
                                                     ▼
-                                   enforce (ripgrep + cron math, zero tokens)
+                                   enforce (pattern + cron math, zero tokens)
                                                     │
                                        ┌────────────┼────────────┐
                                        ▼            ▼            ▼
@@ -73,7 +73,7 @@ The model proposes; a cheap, deterministic verifier disposes.
 
 | Stage | Oracle |
 |---|---|
-| Policy rule | `ripgrep` match + the repo's own build |
+| Policy rule | pattern match + the repo's own build |
 | Remediation diff | `verify` command must pass |
 | Postmortem fix | regression test fails before, passes after |
 | Maintenance impact | cron expression intersects the window |
@@ -88,14 +88,15 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 |---|---|
 | Haiku triage before Opus compile | ~95% of messages never reach the expensive model |
 | Compile once, apply N times | `O(A×R)` → `O(A)` model calls |
-| Detection via ripgrep | repo scanning costs nothing |
+| Detection via pattern matching | repo scanning costs nothing |
 | Ledger dedupe | follow-ups are a lookup, not a model call |
 | Prompt caching | stable prefix at 10% of input price |
 | Batch API for the nightly job | 50% off; latency is irrelevant to cron |
 
 ## Status
 
-- [x] **Phase 1** — artifact schema, registry, ripgrep + cron detectors, ledger, `policyctl`
+- [x] **Phase 1** — artifact schema, registry, pattern + cron detectors, ledger, `policyctl`
+      <br>_103 tests, 97% coverage. See [docs/artifacts.md](docs/artifacts.md) for the artifact schema._
 - [ ] **Phase 2** — the compiler (Haiku triage → Opus compile, structured outputs, eval set)
 - [ ] **Phase 3** — Slack ingestion
 - [ ] **Phase 4** — GitHub output (draft PRs, issues)
@@ -114,6 +115,11 @@ policyctl report            # compliance burndown
 policyctl brief payments    # one morning digest for a team
 ```
 
+`policyctl check` prints which search backend it used. It prefers ripgrep and falls
+back to a pure-Python walk when no binary is found — set `$POLICYFORGE_RG` if `rg` on
+your system is a shell function rather than an executable. Both backends are held to
+the same semantics by a parity test suite.
+
 `policyctl check` needs no API key, no network, and no service. That is what makes it affordable to run as a required status check on every pull request — which is the difference between preventing violations and mopping them up forever.
 
 ## Layout
@@ -124,9 +130,10 @@ src/policyforge/
   registry.py      git-backed artifact store + repo catalog
   ledger.py        SQLite: audit history and action idempotency
   detect/
-    file_pattern.py   ripgrep-backed regex over globs
+    file_pattern.py   regex over globs (ripgrep when available, Python fallback)
     schedule.py       cron × maintenance-window intersection
   cli.py           policyctl
+docs/artifacts.md  artifact schema reference — read this to author one by hand
 registry/          the artifacts themselves — reviewed as PRs
 fixtures/repos/    sample repos the engine runs against
 ```

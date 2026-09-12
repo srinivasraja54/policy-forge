@@ -1,14 +1,27 @@
-"""Regex-over-globs detection, backed by ripgrep.
+"""Regex-over-globs detection, with two interchangeable backends.
 
 Shelling out to ripgrep rather than walking the tree in Python is deliberate:
 on a large monorepo it is one to two orders of magnitude faster, and its JSON
-output already gives us line numbers and matched text. If rg is unavailable we
-fall back to a pure-Python walk so the engine still runs anywhere.
+output already carries line numbers and matched text. Where rg is absent we walk
+the tree in Python instead, so the engine runs anywhere -- including CI images
+and developer laptops that do not ship ripgrep.
+
+The two backends are required to agree. That is enforced upstream rather than
+here: `FilePatternDetect` validates every regex by compiling it with Python's
+`re` at authoring time, so a pattern using PCRE2-only syntax (atomic groups,
+recursion, variable-length lookbehind) is rejected when the artifact is written,
+never at enforcement time on some subset of machines. The registry therefore
+only ever holds patterns both engines understand.
+
+Resolution order for the binary: $POLICYFORGE_RG, then PATH. The override exists
+because `rg` is sometimes a shell function or alias rather than an executable, in
+which case shutil.which finds nothing and we would silently take the slow path.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -17,8 +30,23 @@ from pathlib import Path
 from ..schema import FilePatternDetect
 from .base import Finding, Outcome, RepoTarget, RuleResult
 
-RG = shutil.which("rg")
 _MAX_EXCERPT = 300
+
+
+def _resolve_rg() -> str | None:
+    override = os.environ.get("POLICYFORGE_RG")
+    if override:
+        return override if (Path(override).is_file() and os.access(override, os.X_OK)) else None
+    return shutil.which("rg")
+
+
+RG = _resolve_rg()
+
+
+def backend() -> str:
+    """Which backend a search would use right now. Surfaced so runs are auditable
+    -- a silent switch between backends should never be invisible in a log."""
+    return "ripgrep" if RG else "python"
 
 
 def run(
