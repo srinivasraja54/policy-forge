@@ -67,6 +67,54 @@ Two details worth noting, both produced with **zero model calls**:
 - `web-ui` has a cron at `30 2 * * *` that *does* fire inside the maintenance window — and is correctly not flagged, because it has no Artifactory dependency.
 - `FROM $BASE_IMAGE` is surfaced as a case a human must resolve, rather than silently mis-fixed.
 
+## The funnel, measured
+
+`policyctl compile` over a day of channel traffic. Ten messages: one deprecation
+announcement, one maintenance notice, one security mandate, a deadline change, two
+thread replies, and four pieces of ordinary channel noise.
+
+```console
+$ policyctl compile --stub
+
+ ref        disposition   artifact                              why
+ 00000100   compiled      artifactory-docker-passthrough-2027…  Two distinct obligations in one
+                                                                announcement: registry redirection
+                                                                and digest pinning.
+ 00000101   noise                                               A reader asking a clarifying
+                                                                question; imposes nothing.
+ 00000200   compiled      artifactory-upgrade-2026-10-03        Window taken verbatim. Dependency
+                                                                gate set so unrelated jobs are not
+                                                                reported.
+ 00000400   noise                                               Office facilities notice.
+ 00000500   compiled      k8s-run-as-non-root-2026-11           Admission controller will reject
+                                                                non-compliant workloads.
+ 00000700   amendment                                           Moves the previously announced
+                                                                cutoff from Jan 15 to Feb 1.
+
+10 message(s): 3 compiled, 1 amendment, 6 noise, 0 duplicate, 0 rejected, 0 error
+10 triage call(s), 3 compile call(s)
+
+wrote 3 artifact(s) as status: proposed
+```
+
+**Ten cheap calls, three expensive ones.** That ratio is the whole cost argument,
+and it holds regardless of how many repositories the org has — compilation happens
+once per announcement, never once per announcement × repo.
+
+Three further things in that output are load-bearing:
+
+- **Everything lands as `proposed`.** `policyctl check` ignores it entirely until a
+  human promotes it to `active` in the registry pull request. That review is the
+  only gate between model output and action on someone's repository, and the model
+  cannot open it — `to_artifact()` overwrites `status` and rebuilds provenance from
+  the message we actually read, so a proposal claiming `active` gets neither.
+- **The deadline change is routed as an `amendment`, not a new artifact.** Compiling
+  it fresh would leave two contradictory policies active; dropping it as "just a
+  reply" is how a registry silently goes stale. It amends the artifact it targets —
+  in git, a reviewable two-line diff.
+- **Re-running compiles nothing.** Seen refs are a SQLite lookup, so the second run
+  makes zero expensive calls.
+
 ## Design principle: every LLM output has a deterministic oracle
 
 The model proposes; a cheap, deterministic verifier disposes.
@@ -96,12 +144,13 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 ## Status
 
 - [x] **Phase 1** — artifact schema, registry, pattern + cron detectors, ledger, `policyctl`
-      <br>_103 tests, 97% coverage. See [docs/artifacts.md](docs/artifacts.md) for the artifact schema._
-- [ ] **Phase 2** — the compiler (Haiku triage → Opus compile, structured outputs, eval set)
-- [ ] **Phase 3** — Slack ingestion
+- [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
+- [ ] **Phase 3** — Slack ingestion (the `SourceAdapter` seam is already in place)
 - [ ] **Phase 4** — GitHub output (draft PRs, issues)
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
 - [ ] **Phase 6** — GitHub Actions: nightly compile, enforce-on-push
+
+_158 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
 
 ## Quickstart
 
@@ -109,11 +158,16 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
+policyctl compile --stub    # compile fixture announcements — no API key needed
 policyctl validate          # validate every artifact in the registry
-policyctl check             # enforce against the fixture repos — no API key needed
+policyctl check             # enforce against the fixture repos
 policyctl report            # compliance burndown
 policyctl brief payments    # one morning digest for a team
 ```
+
+`--stub` runs the whole compilation pipeline against canned model responses, so you
+can watch the full flow before deciding whether to supply credentials. Drop the flag
+and set `ANTHROPIC_API_KEY` to run it for real.
 
 `policyctl check` prints which search backend it used. It prefers ripgrep and falls
 back to a pure-Python walk when no binary is found — set `$POLICYFORGE_RG` if `rg` on
@@ -132,6 +186,14 @@ src/policyforge/
   detect/
     file_pattern.py   regex over globs (ripgrep when available, Python fallback)
     schedule.py       cron × maintenance-window intersection
+  compiler/
+    engine.py         two model stages, injectable client
+    pipeline.py       orchestration + the proposal→artifact validation boundary
+    prompts.py        byte-stable system prompts (the cached prefix)
+    stub.py           canned responses, so the pipeline runs with no API key
+  sources/
+    base.py           SourceAdapter protocol — Slack/postmortem/maintenance all
+    fixture.py        reduce to one Message shape
   cli.py           policyctl
 docs/artifacts.md  artifact schema reference — read this to author one by hand
 registry/          the artifacts themselves — reviewed as PRs

@@ -1,0 +1,89 @@
+[
+  {
+    "ref": "C04PLATFORM/p1757600000000100",
+    "channel": "#platform-announcements",
+    "author": "U_ARTIFACTS_LEAD",
+    "posted_at": "2026-09-11T09:14:00+00:00",
+    "source_type": "slack",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757600000000100",
+    "text": "Heads up all — effective Jan 15, the docker.io passthrough on our Artifactory proxy is being shut off for compliance (supply-chain SLSA L2). All Dockerfiles and CI jobs must pull base images from artifactory.corp/docker-remote/ instead. Pipelines still pointing at docker.io or public ECR will fail at build time. Also, FROM ubuntu:latest style unpinned tags are no longer allowed — pin by digest."
+  },
+  {
+    "ref": "C04PLATFORM/p1757600000000101",
+    "channel": "#platform-announcements",
+    "author": "U_DEV_A",
+    "posted_at": "2026-09-11T09:31:00+00:00",
+    "source_type": "slack",
+    "thread_parent": "C04PLATFORM/p1757600000000100",
+    "text": "Does this apply to build-stage images in multi-stage Dockerfiles too, or just the final stage?"
+  },
+  {
+    "ref": "C04PLATFORM/p1757600000000102",
+    "channel": "#platform-announcements",
+    "author": "U_ARTIFACTS_LEAD",
+    "posted_at": "2026-09-11T09:36:00+00:00",
+    "source_type": "slack",
+    "thread_parent": "C04PLATFORM/p1757600000000100",
+    "text": "Every FROM line, both stages. The proxy shutoff doesn't care which stage you're in."
+  },
+  {
+    "ref": "C04PLATFORM/p1757900000000200",
+    "channel": "#platform-announcements",
+    "author": "U_ARTIFACTS_LEAD",
+    "posted_at": "2026-09-12T08:02:00+00:00",
+    "source_type": "maintenance",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757900000000200",
+    "text": "Planned maintenance: on Saturday Oct 3, 02:00–06:00 UTC the Artifactory proxy will be unavailable while we upgrade to 7.90. Artifact pulls and publishes will fail during this window. Please reschedule anything that runs in that slot."
+  },
+  {
+    "ref": "C04PLATFORM/p1757950000000300",
+    "channel": "#platform-announcements",
+    "author": "U_GOVERNANCE",
+    "posted_at": "2026-09-12T10:20:00+00:00",
+    "source_type": "slack",
+    "text": "Reminder: the quarterly access review opens Monday. Team leads will get a DM from the governance bot with their list. Nothing to do until then."
+  },
+  {
+    "ref": "C04PLATFORM/p1757960000000400",
+    "channel": "#platform-announcements",
+    "author": "U_OFFICE",
+    "posted_at": "2026-09-12T11:05:00+00:00",
+    "source_type": "slack",
+    "text": "The coffee machine on floor 3 is broken again ☕ engineer is coming Thursday."
+  },
+  {
+    "ref": "C04PLATFORM/p1757970000000500",
+    "channel": "#platform-announcements",
+    "author": "U_SECURITY",
+    "posted_at": "2026-09-12T13:40:00+00:00",
+    "source_type": "slack",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757970000000500",
+    "text": "Security notice: all Kubernetes workloads must set runAsNonRoot: true in their pod security context by Nov 30. We're turning on the admission controller in staging next week and prod on Dec 1 — anything without it will be rejected at admission."
+  },
+  {
+    "ref": "C04PLATFORM/p1757980000000600",
+    "channel": "#platform-announcements",
+    "author": "U_HR",
+    "posted_at": "2026-09-12T14:15:00+00:00",
+    "source_type": "slack",
+    "text": "Please join me in welcoming Priya to the cloud platform team! She starts Monday and will be working on the landing zone rollout."
+  },
+  {
+    "ref": "C04PLATFORM/p1757990000000700",
+    "channel": "#platform-announcements",
+    "author": "U_ARTIFACTS_LEAD",
+    "posted_at": "2026-09-12T16:45:00+00:00",
+    "source_type": "slack",
+    "thread_parent": "C04PLATFORM/p1757600000000100",
+    "permalink": "https://example.slack.com/archives/C04PLATFORM/p1757990000000700",
+    "text": "Update on the Artifactory passthrough change: after feedback from the payments and data teams we're moving the cutoff from Jan 15 to Feb 1 to give everyone another two weeks. Everything else about the change stands."
+  },
+  {
+    "ref": "C04PLATFORM/p1758000000000800",
+    "channel": "#platform-announcements",
+    "author": "U_SRE",
+    "posted_at": "2026-09-12T17:30:00+00:00",
+    "source_type": "slack",
+    "text": "Standup is moving to 9:45 from next week to accommodate the Bangalore team. Calendar invites updated."
+  }
+]

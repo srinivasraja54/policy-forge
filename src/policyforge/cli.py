@@ -9,7 +9,7 @@ detection-and-nag is not.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import typer
@@ -265,6 +265,94 @@ def brief(
             console.print(f"    - {h['repo']}: {h['finding_count']} finding(s) "
                           f"[dim]({h['rule_id']})[/dim]")
         console.print()
+
+
+@app.command()
+def compile(
+    source_path: Path = typer.Option(Path("fixtures/slack"), "--source", "-s",
+                                     help="Directory of fixture messages."),
+    registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
+    ledger_path: Path = typer.Option(DEFAULT_LEDGER, "--ledger", "-l"),
+    since_days: int = typer.Option(1, "--since-days", help="Look-back window."),
+    stub: bool = typer.Option(False, "--stub", help="Use canned responses; no API key."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Do not write artifacts."),
+    limit: int = typer.Option(None, "--limit", help="Stop after N messages."),
+    min_confidence: float = typer.Option(0.4, "--min-confidence"),
+) -> None:
+    """Compile org signals into proposed artifacts.
+
+    Everything written lands as `status: proposed`. Promoting it to `active` is a
+    human decision made in the registry pull request -- that review is the only
+    gate between model output and action on someone's repository.
+    """
+    from .compiler import Engine, Pipeline
+    from .sources.fixture import FixtureSource
+
+    if stub:
+        from .compiler.stub import StubClient
+
+        client = StubClient()
+        console.print("[dim]using stubbed model responses -- no API calls[/dim]")
+    else:
+        from .compiler import AnthropicClient
+
+        try:
+            client = AnthropicClient()
+        except Exception as exc:
+            console.print(f"[red]cannot reach the model:[/red] {exc}")
+            console.print("[dim]try --stub to run the pipeline offline[/dim]")
+            raise typer.Exit(code=2)
+
+    since = datetime.now(timezone.utc) - timedelta(days=since_days)
+    pipeline = Pipeline(
+        engine=Engine(client=client),
+        registry_root=registry,
+        ledger=Ledger(ledger_path),
+        min_confidence=min_confidence,
+    )
+
+    console.print(f"[dim]reading {source_path} since {since:%Y-%m-%d %H:%M}Z[/dim]")
+    report = pipeline.run(FixtureSource(source_path), since,
+                          dry_run=dry_run, limit=limit)
+
+    table = Table(title="compilation", header_style="bold")
+    for col in ("ref", "disposition", "artifact", "why"):
+        table.add_column(col, overflow="fold")
+
+    colour = {"compiled": "green", "noise": "dim", "duplicate": "dim",
+              "amendment": "cyan", "rejected": "yellow", "error": "red"}
+    for o in report.outcomes:
+        table.add_row(
+            o.ref.split("/")[-1][-8:],
+            f"[{colour.get(o.disposition, 'white')}]{o.disposition}[/]",
+            o.artifact_id or "",
+            o.reason[:90],
+        )
+    console.print(table)
+
+    u = pipeline.engine.usage
+    console.print(
+        f"\n{len(report.outcomes)} message(s): "
+        f"[green]{report.count('compiled')} compiled[/green], "
+        f"[cyan]{report.count('amendment')} amendment[/cyan], "
+        f"[dim]{report.count('noise')} noise[/dim], "
+        f"[dim]{report.count('duplicate')} duplicate[/dim], "
+        f"[yellow]{report.count('rejected')} rejected[/yellow], "
+        f"[red]{report.count('error')} error[/red]"
+    )
+    console.print(
+        f"[dim]{u.triage_calls} triage call(s), {u.compile_calls} compile call(s) · "
+        f"in {u.input_tokens} / out {u.output_tokens} tok · "
+        f"cache read {u.cache_read} · ~${u.estimated_cost_usd():.4f}[/dim]"
+    )
+    if report.written:
+        console.print(f"\nwrote {len(report.written)} artifact(s) as "
+                      f"[bold]status: proposed[/bold]:")
+        for path in report.written:
+            console.print(f"  {path}")
+        console.print("\n[dim]review them, then set status to 'active' to enforce[/dim]")
+    if dry_run:
+        console.print("[yellow]dry run -- nothing written[/yellow]")
 
 
 if __name__ == "__main__":

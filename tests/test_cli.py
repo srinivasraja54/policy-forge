@@ -184,3 +184,60 @@ class TestCatalogHandling:
         res = invoke(workspace, "check", "--root", str(workspace), "--no-record")
         assert "no local path" in res.stdout
         assert res.exit_code == 0
+
+
+class TestCompileCommand:
+    """The compile command must never write an enforceable artifact, and must
+    degrade usefully when no credentials are present."""
+
+    @pytest.fixture
+    def bare(self, tmp_path, repo_root):
+        reg = tmp_path / "registry"
+        (reg / "policies").mkdir(parents=True)
+        (reg / "events").mkdir(parents=True)
+        (reg / "catalog.yaml").write_text(
+            (repo_root / "registry" / "catalog.yaml").read_text()
+        )
+        return tmp_path
+
+    def _run(self, bare, repo_root, *extra):
+        return runner.invoke(app, [
+            "compile", "--stub",
+            "--source", str(repo_root / "fixtures" / "slack"),
+            "--registry", str(bare / "registry"),
+            "--ledger", str(bare / "l.sqlite"),
+            "--since-days", "400", *extra,
+        ])
+
+    def test_compiles_and_reports_the_funnel(self, bare, repo_root):
+        res = self._run(bare, repo_root)
+        assert res.exit_code == 0
+        assert "3 compiled" in res.stdout
+        assert "6 noise" in res.stdout
+        assert "3 compile call(s)" in res.stdout
+
+    def test_written_artifacts_are_proposed_and_inert(self, bare, repo_root):
+        self._run(bare, repo_root)
+        assert runner.invoke(app, ["validate", "--registry",
+                                   str(bare / "registry")]).exit_code == 0
+        res = runner.invoke(app, ["check", "--registry", str(bare / "registry"),
+                                  "--no-record"])
+        assert "no enforceable artifacts" in res.stdout
+
+    def test_dry_run_writes_nothing(self, bare, repo_root):
+        res = self._run(bare, repo_root, "--dry-run")
+        assert "dry run" in res.stdout
+        assert list((bare / "registry" / "policies").glob("*.json")) == []
+
+    def test_missing_credentials_exits_two_with_a_hint(self, bare, repo_root, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        monkeypatch.setattr(
+            "policyforge.compiler.AnthropicClient",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no credentials")),
+        )
+        res = runner.invoke(app, [
+            "compile", "--source", str(repo_root / "fixtures" / "slack"),
+            "--registry", str(bare / "registry"), "--ledger", str(bare / "l.sqlite"),
+        ])
+        assert res.exit_code == 2
+        assert "--stub" in res.stdout
