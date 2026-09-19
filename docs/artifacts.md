@@ -43,6 +43,7 @@ their own expiry.
 | `include_repos` | string[] | no | Empty means every repo in the catalog. |
 | `exclude_repos` | string[] | no | Wins over `include_repos`. |
 | `superseded_by` | string | no | Required when `status` is `superseded`; must resolve to a known id. |
+| `amendments` | array | no | Changes applied after first compilation, oldest first. Appended to, never rewritten. See below. |
 | `confidence` | 0.0–1.0 | no | The compiler's self-reported confidence. Low values route to review. |
 | `created_at` / `updated_at` | timestamp | no | |
 | `notes` | string | no | |
@@ -81,9 +82,26 @@ Only `active` artifacts are enforced. This is the review gate: the compiler
 writes `proposed`, and a human promoting it to `active` in a pull request is the
 single point where model output is checked before it can act on anything.
 
-`superseded` is how follow-up messages are handled. A message saying *"we're
-pushing this to Feb 1"* should not create a second artifact and should not be
-skipped — it amends the existing one, which in git is a reviewable two-line diff.
+A follow-up message saying *"we're pushing this to Feb 1"* creates neither a second
+artifact nor a `superseded` pair. It is applied to the existing artifact as a diff:
+the changed field, plus an `amendments` entry recording what changed it.
+
+`superseded` is reserved for a genuine replacement — a new artifact that takes over
+from an old one — and requires `superseded_by`. `retired` is how an amendment
+withdraws an obligation.
+
+### `amendments[]`
+
+| Field | Type | Notes |
+|---|---|---|
+| `source` | object | Same shape as `source` above: the follow-up message, with its excerpt. |
+| `summary` | string | What the change did. |
+| `applied_at` | timestamp | Also written to the artifact's `updated_at`. |
+| `confidence` | 0.0–1.0 | The compiler's confidence in the amendment. |
+
+An amendment can move `deadline` or `window`, change `severity`, or set `status`
+to `retired`. It cannot change `id`, `kind`, `rules`, or `source`, and it cannot
+set `status` to `active` — those would rewrite what a reviewer already approved.
 
 ## Severity and the blocking gate
 

@@ -214,7 +214,18 @@ class TestCompileCommand:
         assert res.exit_code == 0
         assert "3 compiled" in res.stdout
         assert "6 noise" in res.stdout
-        assert "3 compile call(s)" in res.stdout
+        assert "1 amendment" in res.stdout
+        # Three compilations plus one amendment. The amendment uses the same
+        # expensive model, so it is counted with them rather than hidden.
+        assert "4 compile call(s)" in res.stdout
+
+    def test_amended_artifacts_are_reported_apart_from_written_ones(self, bare, repo_root):
+        """A new artifact is inert until promoted; an amended one may already be
+        active. Reporting them in one list would flatten that difference."""
+        res = self._run(bare, repo_root)
+        assert "wrote 3 artifact(s)" in res.stdout
+        assert "amended 1 existing artifact(s)" in res.stdout
+        assert "takes effect on merge" in res.stdout
 
     def test_written_artifacts_are_proposed_and_inert(self, bare, repo_root):
         self._run(bare, repo_root)

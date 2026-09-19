@@ -83,12 +83,36 @@ A follow-up that moves a deadline is neither a new artifact nor noise.
 - Skipping it as "just a reply" lets the registry quietly go stale, which is worse
   than not having the policy at all — it looks maintained and is not.
 
-So triage classifies it as `amendment` and it becomes a diff against the artifact
-it targets. In git that is a reviewable two-line change with full blame.
+So triage classifies it as `amendment` and it is applied as a diff to the artifact
+it targets, in place, in git, with full blame.
 
-Resolving *which* artifact a follow-up targets needs the thread parent, which
-arrives with Phase 3. Until then amendments are surfaced in the report and left
-for a human rather than being applied or dropped.
+**Which artifact it targets is decided by the thread, not by the model.** A reply
+to the announcement that produced artifact X amends X: the parent's ref is already
+in the ledger with the id it compiled to, so resolution is a SQLite lookup. The
+model is handed that one artifact and asked only what changes — it never chooses
+what to rewrite. Its `target_id` echo is logged if it disagrees and otherwise
+ignored, for the same reason the triage `ref` echo is ignored.
+
+An amendment may move a deadline or a window, change severity, or retire the
+obligation. It may **not** touch the id, the kind, the rules, or the original
+provenance, and it cannot promote anything to `active` — a follow-up that could do
+any of those would be rewriting what a human already reviewed, without review.
+
+What it does add is an entry in `amendments`, carrying the message that caused the
+change. An artifact whose deadline no longer matches the excerpt it was compiled
+from is misleading read on its own, so the thing that moved it travels with it.
+
+Three cases are deliberately *not* amendments:
+
+| Case | Disposition | Why |
+|---|---|---|
+| No resolvable target | `rejected`, **not** marked seen | The stale-registry failure mode. A rerun retries it once the target exists; retrying costs one call to the cheap model. |
+| Target already retired or superseded | `rejected` | A follow-up to a withdrawn obligation must not reanimate it. |
+| Proposes no actual change | `rejected` | A follow-up that restates the rule must not produce a registry commit. |
+
+Amending an `active` artifact is allowed. The registry pull request is still the
+gate — but the diff lands on something already being enforced, so `policyctl
+compile` reports amended artifacts separately from newly written ones, and says so.
 
 ## Cost controls
 

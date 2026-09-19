@@ -5,11 +5,6 @@
   "title": "Artifactory proxy unavailable for upgrade",
   "status": "active",
   "severity": "high",
-  "window": {
-    "start": "2026-10-03T02:00:00Z",
-    "end": "2026-10-03T06:00:00Z"
-  },
-  "actions": ["reschedule_cron", "notify_oncall"],
   "source": {
     "type": "maintenance",
     "ref": "C04PLATFORM/p1757900000000200",
@@ -38,6 +33,17 @@
       }
     }
   ],
+  "window": {
+    "start": "2026-10-03T02:00:00Z",
+    "end": "2026-10-03T06:00:00Z"
+  },
+  "actions": [
+    "reschedule_cron",
+    "notify_oncall"
+  ],
+  "include_repos": [],
+  "exclude_repos": [],
+  "amendments": [],
   "confidence": 0.95,
   "created_at": "2026-09-12T08:03:10Z"
 }

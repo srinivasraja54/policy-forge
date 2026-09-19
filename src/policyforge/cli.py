@@ -351,6 +351,16 @@ def compile(
         for path in report.written:
             console.print(f"  {path}")
         console.print("\n[dim]review them, then set status to 'active' to enforce[/dim]")
+    if report.amended:
+        # Said separately from the written set, and more loudly. A new artifact
+        # is inert until someone promotes it; an amended one may already be
+        # active, so merging this diff changes enforcement immediately.
+        console.print(f"\n[cyan]amended {len(report.amended)} existing artifact(s)"
+                      f"[/cyan]:")
+        for path in report.amended:
+            console.print(f"  {path}")
+        console.print("\n[dim]read the diff -- an amendment to an active artifact "
+                      "takes effect on merge[/dim]")
     if dry_run:
         console.print("[yellow]dry run -- nothing written[/yellow]")
 

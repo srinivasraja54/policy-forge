@@ -64,6 +64,22 @@ class Source(BaseModel):
     )
 
 
+class Amendment(BaseModel):
+    """A change made to an artifact after it was first compiled.
+
+    Recorded on the artifact, not only in the ledger. An artifact whose deadline
+    no longer matches the excerpt it was compiled from is misleading read on its
+    own, so whatever moved it has to travel with it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Source
+    summary: str = Field(max_length=500, description="What this change did.")
+    applied_at: datetime
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class Window(BaseModel):
     """A maintenance / freeze window. Required for kind=event."""
 
@@ -223,6 +239,9 @@ class Artifact(BaseModel):
     exclude_repos: list[str] = Field(default_factory=list)
 
     superseded_by: str | None = None
+    # Follow-ups that changed this artifact after it was first compiled, oldest
+    # first. Appended to, never rewritten: the trail is the point.
+    amendments: list[Amendment] = Field(default_factory=list)
     # Model's self-reported confidence in the compilation. Low values route to
     # human review even when auto-approval is otherwise enabled.
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)

@@ -64,6 +64,10 @@ class Registry:
     artifacts: list[Artifact] = field(default_factory=list)
     catalog: Catalog = field(default_factory=Catalog)
     root: Path | None = None
+    # id -> the file it was loaded from. An amendment rewrites an artifact in
+    # place, and the filename is not guaranteed to be derivable from the id, so
+    # the only safe answer is the path we actually read.
+    paths: dict[str, Path] = field(default_factory=dict)
 
     @classmethod
     def load(cls, root: Path) -> Registry:
@@ -72,6 +76,7 @@ class Registry:
             raise RegistryError(f"registry root not found: {root}")
 
         artifacts: list[Artifact] = []
+        paths: dict[str, Path] = {}
         errors: list[str] = []
         for f in sorted(root.rglob("*.json")):
             try:
@@ -80,9 +85,12 @@ class Registry:
                 errors.append(f"{f}: not valid JSON -- {exc}")
                 continue
             try:
-                artifacts.append(Artifact(**data))
+                artifact = Artifact(**data)
             except ValidationError as exc:
                 errors.append(f"{f}:\n{_indent(str(exc))}")
+                continue
+            artifacts.append(artifact)
+            paths[artifact.id] = f
         if errors:
             raise RegistryError(
                 f"{len(errors)} invalid artifact(s):\n\n" + "\n\n".join(errors)
@@ -103,7 +111,7 @@ class Registry:
 
         catalog_path = root / "catalog.yaml"
         catalog = Catalog.load(catalog_path) if catalog_path.exists() else Catalog()
-        return cls(artifacts=artifacts, catalog=catalog, root=root)
+        return cls(artifacts=artifacts, catalog=catalog, root=root, paths=paths)
 
     def enforceable(self, now=None) -> list[Artifact]:
         return [a for a in self.artifacts if a.is_enforceable(now)]

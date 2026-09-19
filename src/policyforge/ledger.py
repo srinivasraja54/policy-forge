@@ -220,6 +220,19 @@ class Ledger:
             ).fetchone()
         return row is not None
 
+    def source_artifact(self, ref: str) -> str | None:
+        """The artifact a processed message produced, or None.
+
+        This is how a threaded follow-up finds the obligation it amends: the
+        parent's ref is already recorded with the id it compiled to, so resolving
+        the target is a lookup rather than another model call.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT artifact_id FROM processed_sources WHERE ref=?", (ref,)
+            ).fetchone()
+        return row["artifact_id"] if row else None
+
     def mark_source(
         self, ref: str, disposition: str, artifact_id: str | None = None
     ) -> None:

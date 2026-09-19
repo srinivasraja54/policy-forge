@@ -88,16 +88,19 @@ $ policyctl compile --stub
  00000400   noise                                               Office facilities notice.
  00000500   compiled      k8s-run-as-non-root-2026-11           Admission controller will reject
                                                                 non-compliant workloads.
- 00000700   amendment                                           Moves the previously announced
-                                                                cutoff from Jan 15 to Feb 1.
+ 00000700   amendment     artifactory-docker-passthrough-2027…  Cutoff moved from 2027-01-15 to
+                                                                2027-02-01. [deadline]
 
 10 message(s): 3 compiled, 1 amendment, 6 noise, 0 duplicate, 0 rejected, 0 error
-10 triage call(s), 3 compile call(s)
+10 triage call(s), 4 compile call(s)
 
 wrote 3 artifact(s) as status: proposed
+
+amended 1 existing artifact(s):
+  registry/policies/artifactory-docker-passthrough-2027-01.json
 ```
 
-**Ten cheap calls, three expensive ones.** That ratio is the whole cost argument,
+**Ten cheap calls, four expensive ones.** That ratio is the whole cost argument,
 and it holds regardless of how many repositories the org has — compilation happens
 once per announcement, never once per announcement × repo.
 
@@ -108,10 +111,15 @@ Three further things in that output are load-bearing:
   only gate between model output and action on someone's repository, and the model
   cannot open it — `to_artifact()` overwrites `status` and rebuilds provenance from
   the message we actually read, so a proposal claiming `active` gets neither.
-- **The deadline change is routed as an `amendment`, not a new artifact.** Compiling
+- **The deadline change is applied as an `amendment`, not a new artifact.** Compiling
   it fresh would leave two contradictory policies active; dropping it as "just a
-  reply" is how a registry silently goes stale. It amends the artifact it targets —
-  in git, a reviewable two-line diff.
+  reply" is how a registry silently goes stale. Instead it rewrites the artifact it
+  targets, in place — and *which* artifact that is comes from the thread, not from
+  the model: the parent announcement's ref is already in the ledger with the id it
+  compiled to, so the target is a SQLite lookup. The model is shown that one
+  artifact and asked only what changes. In git the result is the moved deadline plus
+  an `amendments` entry carrying the message that moved it, because a deadline that
+  no longer matches the excerpt it was compiled from is misleading on its own.
 - **Re-running compiles nothing.** Seen refs are a SQLite lookup, so the second run
   makes zero expensive calls.
 
@@ -139,18 +147,19 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 | Detection via pattern matching | repo scanning costs nothing |
 | Ledger dedupe | follow-ups are a lookup, not a model call |
 | Prompt caching | stable prefix at 10% of input price |
-| Batch API for the nightly job | 50% off; latency is irrelevant to cron |
+| Batch API for the nightly job | 50% off; latency is irrelevant to cron — *planned, Phase 6* |
 
 ## Status
 
 - [x] **Phase 1** — artifact schema, registry, pattern + cron detectors, ledger, `policyctl`
 - [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
+- [x] **Phase 2.5** — amendments applied, not just reported: thread-resolved targets, provenance trail
 - [ ] **Phase 3** — Slack ingestion (the `SourceAdapter` seam is already in place)
 - [ ] **Phase 4** — GitHub output (draft PRs, issues)
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
 - [ ] **Phase 6** — GitHub Actions: nightly compile, enforce-on-push
 
-_158 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
+_188 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
 
 ## Quickstart
 
@@ -187,8 +196,9 @@ src/policyforge/
     file_pattern.py   regex over globs (ripgrep when available, Python fallback)
     schedule.py       cron × maintenance-window intersection
   compiler/
-    engine.py         two model stages, injectable client
-    pipeline.py       orchestration + the proposal→artifact validation boundary
+    engine.py         three model stages (triage, compile, amend), injectable client
+    pipeline.py       orchestration + the proposal→artifact validation boundary,
+                      and the thread→target resolution amendments run on
     prompts.py        byte-stable system prompts (the cached prefix)
     stub.py           canned responses, so the pipeline runs with no API key
   sources/
