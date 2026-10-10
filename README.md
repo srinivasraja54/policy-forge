@@ -158,7 +158,7 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
 - [x] **Phase 2.5** — amendments applied, not just reported: thread-resolved targets, provenance trail
   - dedupe and resolution now read entirely off the registry (`Registry.source_refs()`) — no ledger, no database; durable across a fresh CI checkout where a `.gitignore`d `ledger.sqlite` would not be
-- [x] **Phase 3** — Slack ingestion: `policyctl compile --slack` reads real channel history and threads through the same `SourceAdapter` seam `FixtureSource` always used. Unit-tested against a mocked Slack API (`httpx.MockTransport`, no network in CI); not yet run against a live workspace.
+- [x] **Phase 3** — Slack ingestion: `policyctl compile --slack` reads real channel history and threads through the same `SourceAdapter` seam `FixtureSource` always used. Unit-tested against a mocked Slack API (`httpx.MockTransport`, no network in CI) *and* verified against a live workspace: a real announcement posted to a real channel was fetched, triaged and compiled by the real model, promoted to `active`, and correctly flagged real violations via `policyctl check` — the whole loop, no stub anywhere.
 - [~] **Phase 4** — GitHub output (draft PRs, issues)
   - [x] autofix applier + `verify` runner: `policyctl remediate` computes a diff from the rule's own `detect.regex`, runs `verify` in a throwaway copy of the repo, and writes only what passed — no model calls
   - [ ] GitHub client: open the verified diff as a draft PR (needs `GITHUB_TOKEN`)
@@ -174,6 +174,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 policyctl compile --stub    # compile fixture announcements — no API key needed
+policyctl compile --slack   # compile real Slack channel history — needs SLACK_BOT_TOKEN
 policyctl validate          # validate every artifact in the registry
 policyctl check             # enforce against the fixture repos
 policyctl remediate         # compute + verify fixes for violations with an autofix

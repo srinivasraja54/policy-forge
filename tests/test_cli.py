@@ -255,6 +255,10 @@ class TestCompileCommand:
     def test_slack_without_config_exits_two_with_a_hint(self, bare, monkeypatch):
         monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
         monkeypatch.delenv("SLACK_CHANNEL_IDS", raising=False)
+        # A real .env with real Slack credentials (as a developer actually
+        # running --slack would have) would otherwise undo the two deletions
+        # above: _load_dotenv() doesn't know this test wants them absent.
+        monkeypatch.setattr("policyforge.cli._load_dotenv", lambda: None)
         res = runner.invoke(app, [
             "compile", "--stub", "--slack", "--registry", str(bare / "registry"),
         ])
