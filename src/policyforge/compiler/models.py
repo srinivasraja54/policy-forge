@@ -111,8 +111,10 @@ class ProposedArtifact(BaseModel):
         "to closer human review rather than being discarded.",
     )
     reasoning: str = Field(
-        max_length=1000,
-        description="Brief note for the human reviewing the registry pull request.",
+        max_length=4000,
+        description="Brief note for the human reviewing the registry pull request. "
+        "Longer than roughly 1000 characters gets truncated for display, so lead "
+        "with the key justification rather than building up to it.",
     )
 
 
@@ -124,7 +126,11 @@ class ProposedAmendment(BaseModel):
     """
 
     target_id: str = Field(description="Artifact id this amends.")
-    change_summary: str = Field(max_length=500)
+    change_summary: str = Field(
+        max_length=2000,
+        description="What this change did, for the reviewer. Longer than roughly "
+        "500 characters gets truncated for display.",
+    )
     new_deadline: date | None = None
     new_window_start: datetime | None = None
     new_window_end: datetime | None = None

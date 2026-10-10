@@ -20,7 +20,7 @@ from policyforge.compiler.models import (
     ProposedAmendment, ProposedArtifact, ProposedRule, TriageVerdict,
 )
 from policyforge.compiler.pipeline import (
-    Pipeline, amendment_changes, apply_amendment, slugify, to_artifact,
+    Pipeline, _brief, amendment_changes, apply_amendment, slugify, to_artifact,
 )
 from policyforge.compiler.stub import StubClient
 from policyforge.ledger import Ledger
@@ -794,3 +794,54 @@ class TestAmendingAnEvent:
         assert "must be after" in amend.reason
         assert event.window.end == datetime(2026, 10, 3, 6, tzinfo=UTC), "unchanged"
         assert event.amendments == []
+
+
+class TestBrief:
+    """The second, tighter cap -- the one the API-facing schema deliberately
+    does not enforce, so an overlong real response fails here, after it is
+    free to parse, rather than failing structured-output validation after it
+    has already been paid for."""
+
+    def test_short_text_is_untouched(self):
+        assert _brief("fits fine", 1000) == "fits fine"
+
+    def test_long_text_is_truncated_with_a_marker(self):
+        out = _brief("x" * 2000, 1000)
+        assert len(out) == 1000
+        assert out.endswith("…")
+
+    def test_boundary_length_is_not_truncated(self):
+        assert _brief("x" * 1000, 1000) == "x" * 1000
+
+
+class TestOverlongModelOutput:
+    """The real failure this guards: a verbose response under high-effort
+    thinking must not fail schema validation and waste a paid-for call."""
+
+    def test_reasoning_schema_accepts_what_used_to_be_rejected(self):
+        """The old cap (max_length=1000) is exactly what broke against the
+        live model; the schema must tolerate it now."""
+        ProposedArtifact(
+            kind="policy", id="p", title="t", severity="warn",
+            confidence=0.9, reasoning="x" * 1500,
+            rules=[ProposedRule(
+                id="r", description="d",
+                detect={"type": "file_pattern", "globs": ["**/x"], "regex": "y"},
+            )],
+        )
+
+    def test_overlong_reasoning_lands_truncated_in_notes(self):
+        art = to_artifact(
+            TestConversionBoundary()._proposal(reasoning="x" * 1500), message()
+        )
+        assert len(art.notes) == 1000
+        assert art.notes.endswith("…")
+
+    def test_overlong_change_summary_lands_truncated_in_the_amendment(self):
+        out = apply_amendment(
+            artifact(), amendment(new_deadline=date(2027, 2, 1),
+                                  change_summary="x" * 800),
+            message(ref=AMEND_REF), {"deadline": date(2027, 2, 1)},
+        )
+        assert len(out.amendments[0].summary) == 500
+        assert out.amendments[0].summary.endswith("…")

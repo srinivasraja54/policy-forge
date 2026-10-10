@@ -40,6 +40,22 @@ _MARK = {
 }
 
 
+def _load_dotenv() -> None:
+    """Populate the environment from `.env`, if present.
+
+    Only called from the `compile` command's real-model path -- `check` and
+    `validate` must keep working with no key, no network and no service, so
+    they never touch this. Soft dependency: `python-dotenv` ships with the
+    `compile` extra, but a shell that already exports ANTHROPIC_API_KEY works
+    with or without it, so a missing package is silent, not an error.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(override=False)
+
+
 def _load(registry: Path) -> Registry:
     try:
         return Registry.load(registry)
@@ -294,6 +310,7 @@ def compile(
         client = StubClient()
         console.print("[dim]using stubbed model responses -- no API calls[/dim]")
     else:
+        _load_dotenv()
         from .compiler import AnthropicClient
 
         try:

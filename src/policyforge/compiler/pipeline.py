@@ -81,6 +81,21 @@ def slugify(raw: str) -> str:
     return s[:79]
 
 
+def _brief(text: str, limit: int) -> str:
+    """Bound a model-authored narrative field for the human reading it.
+
+    The structured-output schema caps `reasoning` / `change_summary` generously
+    (see models.py) so an unusually verbose response under high-effort thinking
+    never fails validation -- a rejection there would waste an already-paid-for
+    compile call and leave nothing written. This is the second, tighter cap that
+    actually keeps "brief note for the reviewer" true on the artifact itself.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
 def to_artifact(proposal: ProposedArtifact, message: Message) -> Artifact:
     """Convert a model proposal into a real artifact.
 
@@ -100,7 +115,7 @@ def to_artifact(proposal: ProposedArtifact, message: Message) -> Artifact:
         "status": Status.PROPOSED,
         "severity": proposal.severity,
         "confidence": proposal.confidence,
-        "notes": proposal.reasoning,
+        "notes": _brief(proposal.reasoning, 1000),
         "source": Source(
             type=message.source_type,
             ref=message.ref,
@@ -188,7 +203,7 @@ def apply_amendment(
             captured_at=message.posted_at,
             excerpt=message.truncated(2000),
         ),
-        summary=proposal.change_summary,
+        summary=_brief(proposal.change_summary, 500),
         applied_at=applied_at,
         confidence=proposal.confidence,
     )
