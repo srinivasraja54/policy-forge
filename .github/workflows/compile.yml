@@ -14,9 +14,14 @@ name: Nightly compile
 # after this workflow was down for a day.
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # 07:00 UTC daily -- adjust to your team's morning
-  workflow_dispatch: {} # manual trigger, e.g. to backfill after an outage
+  # Scheduled trigger commented out until ANTHROPIC_API_KEY, SLACK_BOT_TOKEN
+  # and SLACK_CHANNEL_IDS are configured (repo Settings -> Secrets and
+  # variables -> Actions) -- without them this fails cheaply but pointlessly
+  # every night (AnthropicClient() refuses to construct with no key, before
+  # any model call or spend). Uncomment once they're in place:
+  # schedule:
+  #   - cron: "0 7 * * *" # 07:00 UTC daily -- adjust to your team's morning
+  workflow_dispatch: {} # manual trigger -- use this to test once secrets are set
 
 permissions:
   contents: write

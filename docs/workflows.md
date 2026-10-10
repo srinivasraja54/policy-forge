@@ -32,6 +32,12 @@ announcements, compiles whatever is actionable, and opens one PR with
 everything it wrote — `status: proposed`, so nothing it writes is enforced
 until a human merges it.
 
+**The `schedule:` trigger ships commented out.** Until the secrets below are
+configured, a nightly firing would just fail at `AnthropicClient()` construction
+— cheap (no model call, no spend) but a pointless red run every night. Add the
+secrets, then uncomment the `cron:` line; `workflow_dispatch` works immediately
+for a manual test run regardless.
+
 **Secrets** (repo settings → Secrets and variables → Actions):
 
 | Name | Kind | Used for |
