@@ -1,10 +1,21 @@
 """Orchestration: messages in, proposed artifacts out.
 
-The order of operations is the cost design. Ledger dedupe runs before triage,
-triage runs before compilation, and compilation runs once per announcement --
-never once per repository. A message already seen costs one SQLite lookup; a
-message that is noise costs one cheap call; only a genuine obligation reaches the
-expensive model.
+The order of operations is the cost design. Dedupe runs before triage, triage
+runs before compilation, and compilation runs once per announcement -- never
+once per repository. A message already seen costs one dict lookup against the
+registry; a message that is noise costs one cheap call; only a genuine
+obligation reaches the expensive model.
+
+Dedupe has no side database. The registry is git, checked out fresh on every
+run -- including in CI, where nothing else persists between invocations -- so
+`Registry.source_refs()` is the durable memory of what has already been
+compiled or amended; see that method's docstring. The one thing this does not
+remember across runs is *noise*: a message triaged as not actionable produces
+no artifact, so there is nothing durable to recognise it by next time, and it
+is triaged again. That is a deliberate trade -- re-triaging noise costs one
+cheap call, bounded by however far back `since` looks; silently depending on a
+database that is not guaranteed to survive between CI runs is the failure mode
+this design avoids.
 
 Nothing here writes an `active` artifact. Everything lands as `proposed`, which
 is what makes the registry pull request the single review gate between model
@@ -22,7 +33,6 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from ..ledger import Ledger
 from ..registry import Registry
 from ..schema import Amendment, Artifact, Kind, Severity, Source, Status
 from ..sources.base import Message, SourceAdapter
@@ -270,10 +280,15 @@ class _RunState:
     report: Report
     dry_run: bool
     known_ids: set[str] = field(default_factory=set)
-    # source ref -> artifact id, for artifacts compiled during *this* run. The
-    # ledger only learns them at write time, so without this a follow-up could
-    # not find a parent compiled minutes earlier -- and under --dry-run, where
-    # nothing is ever recorded, it could never find one at all.
+    # ref -> artifact id, for everything the registry already knew about when
+    # this run started -- see Registry.source_refs(). The durable half of
+    # dedupe and amendment-target resolution.
+    known_refs: dict[str, str] = field(default_factory=dict)
+    # ref -> artifact id, for artifacts compiled or amended during *this* run.
+    # known_refs is a snapshot taken at the top of run(); without this, a
+    # follow-up could not find a parent compiled minutes earlier in the same
+    # batch -- and under --dry-run, where nothing reaches the registry at all,
+    # it could never find one any other way.
     produced: dict[str, str] = field(default_factory=dict)
 
 
@@ -281,7 +296,6 @@ class _RunState:
 class Pipeline:
     engine: Engine
     registry_root: Path
-    ledger: Ledger
     min_confidence: float = 0.4
 
     def run(
@@ -298,6 +312,7 @@ class Pipeline:
             report=Report(),
             dry_run=dry_run,
             known_ids={a.id for a in registry.artifacts},
+            known_refs=registry.source_refs(),
         )
 
         processed = 0
@@ -309,8 +324,9 @@ class Pipeline:
         return state.report
 
     def _handle(self, message: Message, state: _RunState) -> Outcome:
-        # 1. Cheapest possible check first: have we already seen this ref?
-        if self.ledger.seen_source(message.ref):
+        # 1. Cheapest possible check first: did this ref already produce
+        # something, this run or a previous one?
+        if message.ref in state.known_refs or message.ref in state.produced:
             return Outcome(message.ref, "duplicate", "already processed")
 
         # 2. Cheap model.
@@ -321,8 +337,6 @@ class Pipeline:
             return Outcome(message.ref, "error", f"triage: {exc}")
 
         if not verdict.actionable or verdict.kind == "none":
-            if not state.dry_run:
-                self.ledger.mark_source(message.ref, "noise")
             return Outcome(message.ref, "noise", verdict.reason, verdict=verdict)
 
         if verdict.kind == "amendment":
@@ -361,7 +375,6 @@ class Pipeline:
             path = self._write(artifact)
             state.registry.paths[artifact.id] = path
             state.report.written.append(path)
-            self.ledger.mark_source(message.ref, "compiled", artifact_id=artifact.id)
 
         return Outcome(message.ref, "compiled", proposal.reasoning,
                        artifact_id=artifact.id, verdict=verdict)
@@ -420,11 +433,14 @@ class Pipeline:
                            artifact_id=target.id, verdict=verdict)
 
         state.registry.artifacts[state.registry.artifacts.index(target)] = amended
+        # Mirrors Registry.source_refs() for the rest of *this* run, the same
+        # way a fresh compile does -- a later message in the same batch must
+        # see this ref as already spoken for too.
+        state.produced[message.ref] = amended.id
 
         if not state.dry_run:
             path = self._rewrite(amended, state.registry)
             state.report.amended.append(path)
-            self.ledger.mark_source(message.ref, "amendment", artifact_id=amended.id)
 
         return Outcome(message.ref, "amendment",
                        f"{proposal.change_summary} [{', '.join(sorted(changes))}]",
@@ -443,7 +459,7 @@ class Pipeline:
         if not parent:
             return None, "not a threaded reply, so its target is unknowable"
 
-        target_id = state.produced.get(parent) or self.ledger.source_artifact(parent)
+        target_id = state.produced.get(parent) or state.known_refs.get(parent)
         if not target_id:
             return None, f"the message it replies to produced no artifact ({parent})"
 

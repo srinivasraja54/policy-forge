@@ -5,11 +5,16 @@ Two jobs, both essential:
 1. Audit history -- every enforcement run appends, so "was repo X compliant with
    policy Y on date Z" is answerable without reconstructing anything.
 2. Idempotency -- an action row keyed (artifact_id, rule_id, repo) is what stops
-   the nightly job opening the same pull request forty times. This is also how
-   follow-up handling stays cheap: it is a lookup, not a model call.
+   the nightly job opening the same pull request forty times.
 
 SQLite on purpose: the enforcement path must run in CI with no network and no
 service dependency.
+
+What this deliberately does *not* do: remember which Slack messages the
+compiler has already seen. That dedupe lives in `Registry.source_refs()`
+instead, because the registry (git, checked out fresh every run) is durable
+across CI runs in a way this file -- gitignored, local to whatever machine
+last ran -- is not. See `compiler/pipeline.py`'s module docstring.
 """
 
 from __future__ import annotations
@@ -62,14 +67,6 @@ CREATE TABLE IF NOT EXISTS actions (
     created_at  TEXT NOT NULL,
     updated_at  TEXT,
     PRIMARY KEY (artifact_id, rule_id, repo)
-);
-
--- Processed source messages. Prevents recompiling the same Slack thread nightly.
-CREATE TABLE IF NOT EXISTS processed_sources (
-    ref          TEXT PRIMARY KEY,
-    artifact_id  TEXT,
-    disposition  TEXT NOT NULL,
-    processed_at TEXT NOT NULL
 );
 """
 
@@ -210,35 +207,3 @@ class Ledger:
             return c.execute(
                 "SELECT * FROM actions WHERE state='open' ORDER BY created_at"
             ).fetchall()
-
-    # ---- source dedupe ----------------------------------------------------
-
-    def seen_source(self, ref: str) -> bool:
-        with self._conn() as c:
-            row = c.execute(
-                "SELECT 1 FROM processed_sources WHERE ref=?", (ref,)
-            ).fetchone()
-        return row is not None
-
-    def source_artifact(self, ref: str) -> str | None:
-        """The artifact a processed message produced, or None.
-
-        This is how a threaded follow-up finds the obligation it amends: the
-        parent's ref is already recorded with the id it compiled to, so resolving
-        the target is a lookup rather than another model call.
-        """
-        with self._conn() as c:
-            row = c.execute(
-                "SELECT artifact_id FROM processed_sources WHERE ref=?", (ref,)
-            ).fetchone()
-        return row["artifact_id"] if row else None
-
-    def mark_source(
-        self, ref: str, disposition: str, artifact_id: str | None = None
-    ) -> None:
-        with self._conn() as c:
-            c.execute(
-                "INSERT OR REPLACE INTO processed_sources (ref, artifact_id,"
-                " disposition, processed_at) VALUES (?,?,?,?)",
-                (ref, artifact_id, disposition, _now()),
-            )

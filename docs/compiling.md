@@ -7,15 +7,17 @@ document covers how that step works, what it costs, and where it is checked.
 ## Two stages
 
 ```
-message ──► ledger dedupe ──► triage (Haiku 4.5) ──► compile (Opus 5) ──► artifact
-             (SQLite)          ~95% stop here        one call per         status:
-             free              cheap                 announcement         proposed
+message ──► registry dedupe ──► triage (Haiku 4.5) ──► compile (Opus 5) ──► artifact
+             (git, no database)  ~95% stop here        one call per         status:
+             free                cheap                 announcement         proposed
 ```
 
 The order is the cost design:
 
-1. **Dedupe first.** A message whose `ref` is already in `processed_sources` costs
-   one SQLite lookup. Nothing else runs.
+1. **Dedupe first.** A message whose `ref` already produced an artifact --
+   its own `source.ref`, or an `Amendment.source.ref` recorded on one -- costs
+   one dict lookup against the already-loaded registry. Nothing else runs. See
+   `Registry.source_refs()`.
 2. **Triage second.** A cheap model decides whether the message imposes an
    obligation that could be checked mechanically. Most channel traffic — welcomes,
    meeting changes, questions, facilities notices — stops here.
@@ -23,7 +25,16 @@ The order is the cost design:
    **never** once per repository. That is what keeps cost independent of org size.
 
 On the bundled fixtures — ten messages representing a day of channel traffic —
-that is ten cheap calls and three expensive ones.
+that is ten cheap calls and four expensive ones (three compilations, one
+amendment -- amendments use the same expensive model).
+
+Dedupe has no side database on purpose: the registry is git, checked out fresh
+on every run, including in CI where nothing else is guaranteed to persist
+between invocations. The one thing this cannot remember is *noise* -- a message
+triaged as not actionable produces no artifact, so there is nothing durable to
+recognise it by, and it is triaged again if `--since-days` sees it a second
+time. That costs one cheap call; the alternative was depending on a ledger file
+surviving between ephemeral CI checkouts, which it is not guaranteed to do.
 
 ## What each stage emits
 
@@ -50,7 +61,7 @@ several things are taken out of the model's hands:
 |---|---|---|
 | `status` | **us** — always `proposed` | A model that could emit `active` would be self-approving. |
 | `source` | **us** — rebuilt from the message | Provenance must describe the message we actually read, not what the model recalls of it. |
-| `id` | model, then slugified and collision-suffixed | The ledger keys on it, so it must be well-formed and unique. |
+| `id` | model, then slugified and collision-suffixed | Other artifacts key on it (`superseded_by`, the registry's own uniqueness check), so it must be well-formed and unique. |
 | `rules`, `severity`, `deadline` | model | This is the actual judgement work. |
 | `confidence` | model | Routes review attention. Below `--min-confidence` (default 0.4) the proposal is rejected rather than written. |
 
@@ -88,7 +99,9 @@ it targets, in place, in git, with full blame.
 
 **Which artifact it targets is decided by the thread, not by the model.** A reply
 to the announcement that produced artifact X amends X: the parent's ref is already
-in the ledger with the id it compiled to, so resolution is a SQLite lookup. The
+recorded as that artifact's `source.ref` (or a prior amendment's), so resolution
+is a dict lookup against `Registry.source_refs()` -- durable with nothing but the
+artifact file itself, no database, no memory of a previous run required. The
 model is handed that one artifact and asked only what changes — it never chooses
 what to rewrite. Its `target_id` echo is logged if it disagrees and otherwise
 ignored, for the same reason the triage `ref` echo is ignored.
@@ -106,7 +119,7 @@ Three cases are deliberately *not* amendments:
 
 | Case | Disposition | Why |
 |---|---|---|
-| No resolvable target | `rejected`, **not** marked seen | The stale-registry failure mode. A rerun retries it once the target exists; retrying costs one call to the cheap model. |
+| No resolvable target | `rejected`, nothing durable recorded | The stale-registry failure mode. A rerun retries it once the target exists; retrying costs one call to the cheap model. |
 | Target already retired or superseded | `rejected` | A follow-up to a withdrawn obligation must not reanimate it. |
 | Proposes no actual change | `rejected` | A follow-up that restates the rule must not produce a registry commit. |
 
@@ -118,7 +131,7 @@ compile` reports amended artifacts separately from newly written ones, and says 
 
 | Control | Where | Effect |
 |---|---|---|
-| Ledger dedupe | `Pipeline._handle` | Seen refs never reach a model. |
+| Registry dedupe | `Pipeline._handle`, `Registry.source_refs()` | A ref that already produced an artifact or amendment never reaches a model. No database. |
 | Triage funnel | stage 1 | Most traffic never reaches the expensive model. |
 | Compile once per announcement | stage 2 | Cost is independent of repo count. |
 | Prompt caching | `prompts.py` + `cache_control` | Stable system prefix served at ~10% of input price. |
@@ -141,8 +154,9 @@ policyctl compile --source fixtures/slack
 ```
 
 Useful flags: `--limit N` caps how many messages are processed, `--dry-run`
-writes nothing and does not mark messages as seen, and `--min-confidence` raises
-the bar for what gets written.
+writes nothing -- including nothing to the registry, so dedupe sees no durable
+record of a dry run and the same message compiles again next time -- and
+`--min-confidence` raises the bar for what gets written.
 
 The compile stage enables server-side fallback
 (`betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`), so a

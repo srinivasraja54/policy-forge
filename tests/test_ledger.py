@@ -154,27 +154,6 @@ class TestActionIdempotency:
                             ("payments-api",)).fetchone()
         assert "vendor-pinned" in row["reason"]
 
-
-class TestSourceDedupe:
-    def test_unseen_source(self, led):
-        assert led.seen_source("C04/p1") is False
-
-    def test_marked_source_is_seen(self, led):
-        led.mark_source("C04/p1", "compiled", artifact_id="pol-1")
-        assert led.seen_source("C04/p1") is True
-
-    def test_remark_updates_rather_than_duplicating(self, led):
-        led.mark_source("C04/p1", "skipped")
-        led.mark_source("C04/p1", "compiled", artifact_id="pol-1")
-        with led._conn() as c:
-            rows = c.execute("SELECT * FROM processed_sources WHERE ref=?",
-                             ("C04/p1",)).fetchall()
-        assert len(rows) == 1
-        assert rows[0]["disposition"] == "compiled"
-        assert rows[0]["artifact_id"] == "pol-1"
-
-    def test_noise_disposition_is_recorded(self, led):
-        """Messages triaged as noise must be remembered too, or the expensive
-        compile stage re-evaluates them every night."""
-        led.mark_source("C04/p9", "noise")
-        assert led.seen_source("C04/p9") is True
+# Compiler dedupe (what used to be TestSourceDedupe here) no longer lives on
+# the ledger -- see Registry.source_refs() and test_compiler.py's
+# TestPipelineFunnel / TestAmendmentResolution for its coverage now.

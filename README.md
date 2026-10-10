@@ -115,13 +115,16 @@ Three further things in that output are load-bearing:
   it fresh would leave two contradictory policies active; dropping it as "just a
   reply" is how a registry silently goes stale. Instead it rewrites the artifact it
   targets, in place — and *which* artifact that is comes from the thread, not from
-  the model: the parent announcement's ref is already in the ledger with the id it
-  compiled to, so the target is a SQLite lookup. The model is shown that one
-  artifact and asked only what changes. In git the result is the moved deadline plus
-  an `amendments` entry carrying the message that moved it, because a deadline that
-  no longer matches the excerpt it was compiled from is misleading on its own.
-- **Re-running compiles nothing.** Seen refs are a SQLite lookup, so the second run
-  makes zero expensive calls.
+  the model: the parent announcement's ref is already recorded as that artifact's
+  `source.ref`, so the target is a dict lookup against the registry — no database,
+  durable with nothing but the git-tracked artifact file. The model is shown that
+  one artifact and asked only what changes. In git the result is the moved deadline
+  plus an `amendments` entry carrying the message that moved it, because a deadline
+  that no longer matches the excerpt it was compiled from is misleading on its own.
+- **Re-running recompiles nothing that already landed.** A ref already represented
+  in the registry — compiled or amended — is a dict lookup, so the expensive stage
+  never repeats. Noise isn't remembered this way (nothing is written for it), so
+  it's triaged again if seen twice; that costs one cheap call, not zero.
 
 ## Design principle: every LLM output has a deterministic oracle
 
@@ -145,7 +148,7 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 | Haiku triage before Opus compile | ~95% of messages never reach the expensive model |
 | Compile once, apply N times | `O(A×R)` → `O(A)` model calls |
 | Detection via pattern matching | repo scanning costs nothing |
-| Ledger dedupe | follow-ups are a lookup, not a model call |
+| Registry dedupe | an already-compiled or -amended ref is a dict lookup, no database — durable across CI runs for free |
 | Prompt caching | stable prefix at 10% of input price |
 | Batch API for the nightly job | 50% off; latency is irrelevant to cron — *planned, Phase 6* |
 
@@ -154,6 +157,7 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [x] **Phase 1** — artifact schema, registry, pattern + cron detectors, ledger, `policyctl`
 - [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
 - [x] **Phase 2.5** — amendments applied, not just reported: thread-resolved targets, provenance trail
+  - dedupe and resolution now read entirely off the registry (`Registry.source_refs()`) — no ledger, no database; durable across a fresh CI checkout where a `.gitignore`d `ledger.sqlite` would not be
 - [ ] **Phase 3** — Slack ingestion (the `SourceAdapter` seam is already in place)
 - [~] **Phase 4** — GitHub output (draft PRs, issues)
   - [x] autofix applier + `verify` runner: `policyctl remediate` computes a diff from the rule's own `detect.regex`, runs `verify` in a throwaway copy of the repo, and writes only what passed — no model calls
@@ -161,7 +165,7 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
 - [ ] **Phase 6** — GitHub Actions: nightly compile, enforce-on-push
 
-_244 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
+_244 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
 
 ## Quickstart
 
@@ -174,7 +178,7 @@ policyctl validate          # validate every artifact in the registry
 policyctl check             # enforce against the fixture repos
 policyctl remediate         # compute + verify fixes for violations with an autofix
 policyctl report            # compliance burndown
-policyctl brief payments    # one morning digest for a team
+policyctl brief <team's channel name>    # one morning digest for a team
 ```
 
 `--stub` runs the whole compilation pipeline against canned model responses, so you

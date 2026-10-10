@@ -122,6 +122,26 @@ class Registry:
     def by_id(self, artifact_id: str) -> Artifact | None:
         return next((a for a in self.artifacts if a.id == artifact_id), None)
 
+    def source_refs(self) -> dict[str, str]:
+        """Every message ref that has already produced output, mapped to the
+        artifact it produced or amended.
+
+        This is the compiler's durable dedupe and amendment-target resolution,
+        with no side database: a message already represented here needs no
+        ledger to be remembered, because the registry already is the record --
+        it is git, checked out fresh on every run, including in CI where
+        nothing else persists between invocations. An artifact's own
+        `source.ref`, and every `Amendment.source.ref` recorded on it, both
+        count; either means this exact message already has a durable effect
+        that reprocessing it would duplicate.
+        """
+        refs: dict[str, str] = {}
+        for a in self.artifacts:
+            refs.setdefault(a.source.ref, a.id)
+            for amendment in a.amendments:
+                refs.setdefault(amendment.source.ref, a.id)
+        return refs
+
 
 def _indent(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())

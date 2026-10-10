@@ -20,10 +20,10 @@ from policyforge.compiler.models import (
     ProposedAmendment, ProposedArtifact, ProposedRule, TriageVerdict,
 )
 from policyforge.compiler.pipeline import (
-    Pipeline, _brief, amendment_changes, apply_amendment, slugify, to_artifact,
+    Pipeline, Report, _brief, _RunState, amendment_changes, apply_amendment,
+    slugify, to_artifact,
 )
 from policyforge.compiler.stub import StubClient
-from policyforge.ledger import Ledger
 from policyforge.registry import Registry
 from policyforge.schema import Artifact, Kind, Severity, SourceType, Status
 from policyforge.sources.base import Message
@@ -53,7 +53,6 @@ def pipeline_for(workspace: Path, client=None, **kw) -> Pipeline:
     return Pipeline(
         engine=Engine(client=client or StubClient()),
         registry_root=workspace / "registry",
-        ledger=Ledger(workspace / "l.sqlite"),
         **kw,
     )
 
@@ -256,6 +255,10 @@ class TestPipelineFunnel:
         assert len(list((workspace / "registry" / "policies").glob("*.json"))) == 2
 
     def test_second_run_compiles_nothing(self, workspace, slack_dir):
+        """The durable guarantee is about the expensive stage, not every call:
+        dedupe comes from the registry alone, which remembers a compiled or
+        amended ref forever but has no way to remember noise -- so noise is
+        triaged again (cheap), while nothing is ever recompiled (expensive)."""
         pipe = pipeline_for(workspace, StubClient())
         pipe.run(FixtureSource(slack_dir), EPOCH)
 
@@ -264,7 +267,10 @@ class TestPipelineFunnel:
         report = pipe2.run(FixtureSource(slack_dir), EPOCH)
 
         assert report.count("compiled") == 0
-        assert report.count("duplicate") == 10
+        assert report.count("amendment") == 0
+        assert report.count("duplicate") == 4, "the 3 compiled + 1 amended refs"
+        assert report.count("noise") == 6, "re-triaged -- nothing remembers noise"
+        assert len(client2.calls) == 6, "one cheap call per re-triaged message"
         assert [c for c in client2.calls if c[0] == COMPILE_MODEL] == []
 
     def test_dry_run_writes_nothing_and_does_not_mark_seen(self, workspace, slack_dir):
@@ -272,7 +278,10 @@ class TestPipelineFunnel:
         report = pipe.run(FixtureSource(slack_dir), EPOCH, dry_run=True)
         assert report.written == []
         assert list((workspace / "registry" / "policies").glob("*.json")) == []
-        assert not pipe.ledger.seen_source("C04PLATFORM/p1757600000000100")
+        # Nothing durable happened: dedupe comes from the registry alone, and
+        # a dry run touches no file in it.
+        refs = Registry.load(workspace / "registry").source_refs()
+        assert "C04PLATFORM/p1757600000000100" not in refs
 
     def test_limit_stops_early(self, workspace, slack_dir):
         pipe = pipeline_for(workspace, StubClient())
@@ -310,14 +319,18 @@ class TestPipelineRejection:
         report = pipeline_for(workspace, StubClient()).run(FixtureSource(src), EPOCH)
         assert report.count("noise") == 1
 
-    def test_id_collision_gets_a_suffix(self, workspace, slack_dir):
-        pipe = pipeline_for(workspace, StubClient())
-        pipe.run(FixtureSource(slack_dir), EPOCH)
-        # Clear the dedupe ledger so the same messages compile again.
-        pipe.ledger = Ledger(workspace / "fresh.sqlite")
-        report = pipe.run(FixtureSource(slack_dir), EPOCH)
-        ids = [o.artifact_id for o in report.compiled]
-        assert any(i.endswith("-2") for i in ids), ids
+    def test_id_collision_gets_a_suffix(self):
+        """Two distinct messages whose compilations land on the same slug --
+        orthogonal to dedupe, which is about one ref, not one id. Tested
+        directly against the mechanism rather than through a full run: with
+        dedupe now durable via the registry (see TestPipelineFunnel), there is
+        no longer a way to force the *same* ref through the pipeline twice."""
+        art = to_artifact(TestConversionBoundary()._proposal(), message())
+        collided = Pipeline._deduplicate_id(art, known_ids={art.id})
+        assert collided.id == f"{art.id}-2"
+        assert Pipeline._deduplicate_id(art, known_ids=set()) is art, (
+            "no collision must return the same object, not a copy"
+        )
 
 
 class TestAmendmentRouting:
@@ -525,7 +538,8 @@ class TestAmendmentResolution:
         self, workspace, slack_dir, tmp_path
     ):
         """The realistic case: the announcement compiled last week, the
-        follow-up arrives tonight. Resolution is a ledger lookup."""
+        follow-up arrives tonight. Resolution is a registry lookup -- durable
+        with nothing but the git-tracked artifact file, no database at all."""
         full = json.loads((slack_dir / "platform-announcements.json").read_text())
         pipe = pipeline_for(workspace, StubClient())
         pipe.run(FixtureSource(_only(tmp_path, "day1", full, PARENT_REF)), EPOCH)
@@ -540,7 +554,7 @@ class TestAmendmentResolution:
     def test_an_amendment_is_not_reprocessed(self, workspace, slack_dir):
         pipe = pipeline_for(workspace, StubClient())
         pipe.run(FixtureSource(slack_dir), EPOCH)
-        assert pipe.ledger.seen_source(AMEND_REF)
+        assert AMEND_REF in Registry.load(workspace / "registry").source_refs()
 
         client2 = StubClient()
         report = pipeline_for(workspace, client2).run(FixtureSource(slack_dir), EPOCH)
@@ -564,7 +578,12 @@ class TestAmendmentResolution:
         assert report.count("amendment") == 0
         assert "unresolved" in report.outcomes[0].reason
         assert "not a threaded reply" in report.outcomes[0].reason
-        assert not pipe.ledger.seen_source("C0/p000700"), "must be retried"
+
+        # Must be retried, not quietly marked done: nothing durable recorded
+        # this ref, so a second run sees it fresh rather than as a duplicate.
+        again = pipe.run(FixtureSource(src), EPOCH)
+        assert again.outcomes[0].disposition == "rejected"
+        assert again.outcomes[0].reason == report.outcomes[0].reason
 
     def test_a_reply_to_noise_has_nothing_to_amend(self, workspace, tmp_path):
         src = tmp_path / "msgs"
@@ -580,29 +599,40 @@ class TestAmendmentResolution:
         assert report.outcomes[1].disposition == "rejected"
         assert "produced no artifact" in report.outcomes[1].reason
 
-    def test_a_retired_target_is_not_reanimated(self, workspace, slack_dir):
-        pipe = pipeline_for(workspace, StubClient())
-        pipe.run(FixtureSource(slack_dir), EPOCH)
+    def test_a_retired_target_is_not_reanimated(self, workspace, slack_dir, tmp_path):
+        full = json.loads((slack_dir / "platform-announcements.json").read_text())
+        pipeline_for(workspace, StubClient()).run(
+            FixtureSource(_only(tmp_path, "day1", full, PARENT_REF)), EPOCH
+        )
 
         path = workspace / "registry" / "policies" / f"{POLICY_ID}.json"
         raw = json.loads(path.read_text())
         raw["status"] = "retired"
         path.write_text(json.dumps(raw))
 
-        pipe.ledger = Ledger(workspace / "fresh.sqlite")
-        pipe.ledger.mark_source(PARENT_REF, "compiled", artifact_id=POLICY_ID)
-        report = pipe.run(FixtureSource(slack_dir), EPOCH)
+        # No ledger priming needed: the artifact is still on disk with its
+        # original source.ref, so a fresh Pipeline resolves the parent from
+        # the registry alone.
+        report = pipeline_for(workspace, StubClient()).run(
+            FixtureSource(_only(tmp_path, "day2", full, AMEND_REF)), EPOCH
+        )
         amend = next(o for o in report.outcomes if o.ref == AMEND_REF)
         assert amend.disposition == "rejected"
         assert "already retired" in amend.reason
 
-    def test_dry_run_amends_nothing_on_disk(self, workspace, slack_dir):
-        pipe = pipeline_for(workspace, StubClient())
-        pipe.run(FixtureSource(slack_dir), EPOCH)
+    def test_dry_run_amends_nothing_on_disk(self, workspace, slack_dir, tmp_path):
+        """Once an amendment is durably applied, its ref is itself recorded
+        (Amendment.source.ref), so reprocessing it is correctly a duplicate --
+        this has to dry-run one that has not been applied yet."""
+        full = json.loads((slack_dir / "platform-announcements.json").read_text())
+        pipeline_for(workspace, StubClient()).run(
+            FixtureSource(_only(tmp_path, "day1", full, PARENT_REF)), EPOCH
+        )
         before = (workspace / "registry" / "policies" / f"{POLICY_ID}.json").read_text()
 
-        pipe.ledger = Ledger(workspace / "fresh.sqlite")
-        report = pipe.run(FixtureSource(slack_dir), EPOCH, dry_run=True)
+        report = pipeline_for(workspace, StubClient()).run(
+            FixtureSource(_only(tmp_path, "day2", full, AMEND_REF)), EPOCH, dry_run=True
+        )
         assert report.count("amendment") == 1, "still reported"
         assert report.amended == []
         assert (workspace / "registry" / "policies"
@@ -706,20 +736,23 @@ class TestAmendmentFailureModes:
         assert "window cannot be set on a policy" in amend.reason
         assert report.amended == []
 
-    def test_a_target_deleted_from_the_registry_is_rejected(self, workspace, tmp_path):
-        """The ledger remembers an id the registry no longer has."""
-        src = tmp_path / "msgs"
-        src.mkdir()
-        (src / "m.json").write_text(json.dumps([{
-            "ref": AMEND_REF, "text": "moving the cutoff",
-            "posted_at": "2026-09-12T00:00:00+00:00", "thread_parent": PARENT_REF,
-        }]))
+    def test_a_target_known_but_missing_from_the_registry_is_rejected(self, workspace):
+        """Defensive, and no longer reachable through a full run: known_refs
+        and registry.artifacts are built from the same loaded list, so they
+        cannot disagree in practice any more. Tested directly against
+        _resolve_target so the check itself stays proven if that ever
+        changes, rather than deleting it as dead code."""
+        reg = Registry.load(workspace / "registry")
+        state = _RunState(
+            registry=reg, report=Report(), dry_run=False,
+            known_refs={PARENT_REF: "an-id-not-in-the-registry"},
+        )
         pipe = pipeline_for(workspace, StubClient())
-        pipe.ledger.mark_source(PARENT_REF, "compiled", artifact_id=POLICY_ID)
-
-        report = pipe.run(FixtureSource(src), EPOCH)
-        assert report.outcomes[0].disposition == "rejected"
-        assert "no longer in the registry" in report.outcomes[0].reason
+        target, why = pipe._resolve_target(
+            message(ref=AMEND_REF, thread_parent=PARENT_REF), state
+        )
+        assert target is None
+        assert "no longer in the registry" in why
 
     def test_rewriting_an_artifact_with_no_known_path_falls_back_to_writing_one(
         self, workspace

@@ -130,3 +130,42 @@ class TestCatalog:
         assert cat.by_name("web-ui").team == "frontend"
         assert cat.by_name("nope") is None
         assert cat.teams() == {"payments", "data", "frontend"}
+
+
+class TestSourceRefs:
+    """The compiler's durable dedupe and amendment-target resolution -- both
+    read straight off whatever the registry already has on disk, no database."""
+
+    def test_empty_registry_has_no_refs(self, tmp_path):
+        assert Registry.load(tmp_path).source_refs() == {}
+
+    def test_an_artifacts_own_ref_is_mapped_to_its_id(self, tmp_path):
+        write_artifact(tmp_path, "pol-one",
+                       source={"type": "slack", "ref": "C0/p1",
+                               "captured_at": "2026-09-01T00:00:00Z"})
+        refs = Registry.load(tmp_path).source_refs()
+        assert refs == {"C0/p1": "pol-one"}
+
+    def test_an_amendments_ref_resolves_to_the_artifact_it_changed(self, tmp_path):
+        write_artifact(
+            tmp_path, "pol-one",
+            source={"type": "slack", "ref": "C0/p1",
+                    "captured_at": "2026-09-01T00:00:00Z"},
+            amendments=[{
+                "source": {"type": "slack", "ref": "C0/p2",
+                           "captured_at": "2026-09-02T00:00:00Z"},
+                "summary": "moved the deadline", "applied_at": "2026-09-02T00:00:00Z",
+            }],
+        )
+        refs = Registry.load(tmp_path).source_refs()
+        assert refs == {"C0/p1": "pol-one", "C0/p2": "pol-one"}
+
+    def test_multiple_artifacts_each_contribute_their_own_refs(self, tmp_path):
+        write_artifact(tmp_path, "pol-one",
+                       source={"type": "slack", "ref": "C0/p1",
+                               "captured_at": "2026-09-01T00:00:00Z"})
+        write_artifact(tmp_path, "pol-two",
+                       source={"type": "slack", "ref": "C0/p2",
+                               "captured_at": "2026-09-01T00:00:00Z"})
+        refs = Registry.load(tmp_path).source_refs()
+        assert refs == {"C0/p1": "pol-one", "C0/p2": "pol-two"}

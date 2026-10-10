@@ -205,7 +205,6 @@ class TestCompileCommand:
             "compile", "--stub",
             "--source", str(repo_root / "fixtures" / "slack"),
             "--registry", str(bare / "registry"),
-            "--ledger", str(bare / "l.sqlite"),
             "--since-days", "400", *extra,
         ])
 
@@ -248,7 +247,7 @@ class TestCompileCommand:
         )
         res = runner.invoke(app, [
             "compile", "--source", str(repo_root / "fixtures" / "slack"),
-            "--registry", str(bare / "registry"), "--ledger", str(bare / "l.sqlite"),
+            "--registry", str(bare / "registry"),
         ])
         assert res.exit_code == 2
         assert "--stub" in res.stdout

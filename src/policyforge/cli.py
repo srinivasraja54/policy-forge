@@ -407,7 +407,6 @@ def compile(
     source_path: Path = typer.Option(Path("fixtures/slack"), "--source", "-s",
                                      help="Directory of fixture messages."),
     registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
-    ledger_path: Path = typer.Option(DEFAULT_LEDGER, "--ledger", "-l"),
     since_days: int = typer.Option(1, "--since-days", help="Look-back window."),
     stub: bool = typer.Option(False, "--stub", help="Use canned responses; no API key."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Do not write artifacts."),
@@ -419,6 +418,14 @@ def compile(
     Everything written lands as `status: proposed`. Promoting it to `active` is a
     human decision made in the registry pull request -- that review is the only
     gate between model output and action on someone's repository.
+
+    Dedupe needs no database: a message already represented by some artifact's
+    `source.ref` (or an amendment's) is skipped, which is durable across runs
+    with nothing but the registry itself -- see `Registry.source_refs()`. A
+    message triaged as noise is not remembered this way and gets re-triaged if
+    `--since-days` sees it again; that costs one cheap call, which is the
+    trade this design makes instead of depending on a ledger file surviving
+    between CI runs.
     """
     from .compiler import Engine, Pipeline
     from .sources.fixture import FixtureSource
@@ -443,7 +450,6 @@ def compile(
     pipeline = Pipeline(
         engine=Engine(client=client),
         registry_root=registry,
-        ledger=Ledger(ledger_path),
         min_confidence=min_confidence,
     )
 
