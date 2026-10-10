@@ -178,8 +178,18 @@ policyctl brief payments    # one morning digest for a team
 ```
 
 `--stub` runs the whole compilation pipeline against canned model responses, so you
-can watch the full flow before deciding whether to supply credentials. Drop the flag
-and set `ANTHROPIC_API_KEY` to run it for real.
+can watch the full flow before deciding whether to supply credentials. To run it for
+real:
+
+```bash
+pip install -e ".[dev,compile]"   # adds the anthropic SDK + python-dotenv
+cp .env.example .env              # fill in ANTHROPIC_API_KEY
+policyctl compile                 # .env is loaded automatically; drop --stub
+```
+
+`.env` is only ever read on this path — `check` and `validate` need no key, no
+network, and no service, and nothing about them changes whether or not `.env`
+exists.
 
 `policyctl check` prints which search backend it used. It prefers ripgrep and falls
 back to a pure-Python walk when no binary is found — set `$POLICYFORGE_RG` if `rg` on
@@ -187,6 +197,12 @@ your system is a shell function rather than an executable. Both backends are hel
 the same semantics by a parity test suite.
 
 `policyctl check` needs no API key, no network, and no service. That is what makes it affordable to run as a required status check on every pull request — which is the difference between preventing violations and mopping them up forever.
+
+`policyctl remediate` is dry-run by default: it computes a diff and, where the rule
+sets a `verify` command, runs it in a throwaway copy of the repo — never the real
+checkout. `--write` applies a fix only once that verify has passed. A rule with no
+`verify` stays diff-only regardless of `--write`; there is no flag that skips the
+oracle.
 
 ## Layout
 
