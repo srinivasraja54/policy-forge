@@ -178,8 +178,8 @@ class TestConversionBoundary:
     def test_event_window_is_restored(self):
         art = to_artifact(
             self._proposal(kind="event", deadline=None,
-                           window_start="2026-10-03T02:00:00Z",
-                           window_end="2026-10-03T06:00:00Z"),
+                           window_start="2037-10-03T02:00:00Z",
+                           window_end="2037-10-03T06:00:00Z"),
             message(),
         )
         assert art.kind is Kind.EVENT
@@ -766,7 +766,7 @@ class TestAmendmentFailureModes:
         assert json.loads(path.read_text())["id"] == POLICY_ID
 
 
-EVENT_ID = "artifactory-upgrade-2026-10-03"
+EVENT_ID = "artifactory-upgrade-2037-10-03"
 EVENT_REF = "C04PLATFORM/p1757900000000200"
 
 
@@ -791,12 +791,12 @@ class TestAmendingAnEvent:
     def test_a_window_can_be_extended(self, workspace, slack_dir, tmp_path):
         report, event = self._amend_the_event(
             workspace, slack_dir, tmp_path,
-            new_window_end=datetime(2026, 10, 3, 8, tzinfo=UTC),
+            new_window_end=datetime(2037, 10, 3, 8, tzinfo=UTC),
             change_summary="Upgrade overran; window extended to 08:00 UTC.",
         )
         assert report.count("amendment") == 1
-        assert event.window.start == datetime(2026, 10, 3, 2, tzinfo=UTC), "untouched"
-        assert event.window.end == datetime(2026, 10, 3, 8, tzinfo=UTC)
+        assert event.window.start == datetime(2037, 10, 3, 2, tzinfo=UTC), "untouched"
+        assert event.window.end == datetime(2037, 10, 3, 8, tzinfo=UTC)
         assert event.amendments[0].source.ref == "C0TEST/p000700"
 
     def test_the_thread_decides_the_target_not_the_model(
@@ -807,9 +807,9 @@ class TestAmendingAnEvent:
         _, event = self._amend_the_event(
             workspace, slack_dir, tmp_path,
             target_id="a-policy-2027",
-            new_window_end=datetime(2026, 10, 3, 8, tzinfo=UTC),
+            new_window_end=datetime(2037, 10, 3, 8, tzinfo=UTC),
         )
-        assert event.window.end == datetime(2026, 10, 3, 8, tzinfo=UTC)
+        assert event.window.end == datetime(2037, 10, 3, 8, tzinfo=UTC)
         assert Registry.load(workspace / "registry").by_id("a-policy-2027") is None
 
     def test_an_inverted_window_is_refused_by_our_schema(
@@ -819,13 +819,13 @@ class TestAmendingAnEvent:
         when the artifact is rebuilt. That rebuild is why it fails at all."""
         report, event = self._amend_the_event(
             workspace, slack_dir, tmp_path,
-            new_window_start=datetime(2026, 10, 3, 9, tzinfo=UTC),
+            new_window_start=datetime(2037, 10, 3, 9, tzinfo=UTC),
         )
         amend = report.outcomes[0]
         assert amend.disposition == "rejected"
         assert "amendment not applied" in amend.reason
         assert "must be after" in amend.reason
-        assert event.window.end == datetime(2026, 10, 3, 6, tzinfo=UTC), "unchanged"
+        assert event.window.end == datetime(2037, 10, 3, 6, tzinfo=UTC), "unchanged"
         assert event.amendments == []
 
 

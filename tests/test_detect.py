@@ -31,7 +31,7 @@ def outcome_of(results, rule_id):
 
 
 POLICY = "artifactory-docker-passthrough-2027-01"
-EVENT = "artifactory-upgrade-2026-10-03"
+EVENT = "artifactory-upgrade-2037-10-03"
 
 
 class TestFilePattern:
@@ -74,7 +74,7 @@ class TestScheduleIntersection:
                          "jobs-in-window")
         assert res.outcome is Outcome.VIOLATING
         assert res.findings[0].excerpt == "0 3 * * *"
-        assert "2026-10-03 03:00" in res.findings[0].detail
+        assert "2037-10-03 03:00" in res.findings[0].detail
 
     def test_finds_both_workflow_and_k8s_cronjob(self, reg, fixtures_dir):
         res = outcome_of(results_for(reg, EVENT, "data-platform", fixtures_dir),
@@ -89,6 +89,21 @@ class TestScheduleIntersection:
         res = outcome_of(results_for(reg, EVENT, "web-ui", fixtures_dir),
                          "jobs-in-window")
         assert res.outcome is Outcome.CLEAR
+
+    def test_the_fixture_windows_day_of_week_is_not_arbitrary(self, reg):
+        """weekly-retrain (`0 4 * * 6`) and table-compaction (`30 2 * * 6`) are
+        Saturday-only crons -- `6` in cron's day-of-week field. The maintenance
+        window has to land on a Saturday or test_finds_both_workflow_and_k8s_
+        cronjob silently loses both its findings, with a failure that looks
+        like a cron-math bug rather than what it actually is: the registry's
+        own date no longer lining up with the fixture crons it was chosen to
+        intersect. This pins that choice so the next date bump trips here,
+        with an explicit reason, rather than there."""
+        event = reg.by_id(EVENT)
+        assert event.window.start.weekday() == 5, (
+            f"{event.id}'s window must fall on a Saturday (weekday 5); "
+            f"got {event.window.start.strftime('%A')}"
+        )
 
     def test_cron_outside_window_not_flagged(self, source_stub, tmp_path):
         wf = tmp_path / ".github" / "workflows"

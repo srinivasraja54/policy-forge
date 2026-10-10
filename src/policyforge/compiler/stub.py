@@ -73,10 +73,10 @@ _COMPILE: dict[str, dict[str, Any]] = {
         ],
     ),
     "000200": dict(
-        kind="event", id="artifactory-upgrade-2026-10-03",
+        kind="event", id="artifactory-upgrade-2037-10-03",
         title="Artifactory proxy unavailable for upgrade",
         severity="high", confidence=0.95,
-        window_start="2026-10-03T02:00:00Z", window_end="2026-10-03T06:00:00Z",
+        window_start="2037-10-03T02:00:00Z", window_end="2037-10-03T06:00:00Z",
         reasoning="Window taken verbatim from the notice. Dependency gate set so "
                   "jobs unrelated to Artifactory are not reported.",
         rules=[

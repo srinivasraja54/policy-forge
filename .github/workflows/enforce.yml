@@ -1,0 +1,39 @@
+name: Enforce
+
+# "enforce-on-push" -- the cheap half of Phase 6. `policyctl check` needs no
+# API key, no network and no service, which is the whole argument for running
+# it as a required status check on every push instead of a nightly scan: a
+# real deployment points --registry/--root at its own fleet; this repo points
+# them at the bundled demo registry and fixture repos, which is the same
+# command either way.
+#
+# A per-repo deployment would copy this file (or the pattern from
+# docs/workflows.md) into each downstream repo it protects, with --root set
+# to that repo's own checkout and --repo to its own name in catalog.yaml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e .
+
+      # Optional: ripgrep makes `check` faster on a large repo. The pure-Python
+      # fallback is correctness-equivalent (see tests/test_backend.py) and the
+      # bundled fixtures are tiny, so this step is skipped here on purpose --
+      # a real deployment on a large monorepo would want it installed.
+
+      - name: Enforce active policy
+        run: policyctl check --no-record

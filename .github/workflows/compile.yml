@@ -1,0 +1,64 @@
+name: Nightly compile
+
+# The expensive half of Phase 6, and the only workflow here that spends
+# tokens or touches a third-party API. Reads recent Slack announcements,
+# compiles whatever is actionable, and opens one PR with everything it wrote
+# -- status: proposed, so merging it is still the only thing that makes any
+# of it enforceable.
+#
+# --since-days is wider than the schedule interval on purpose. Dedupe is
+# durable via the registry itself (Registry.source_refs(), see
+# docs/compiling.md), not a side database, so a window that overlaps the
+# previous run costs nothing extra: an already-compiled or -amended ref is a
+# dict lookup away from being skipped, every time, including the first run
+# after this workflow was down for a day.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC daily -- adjust to your team's morning
+  workflow_dispatch: {} # manual trigger, e.g. to backfill after an outage
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[compile,slack]"
+
+      - name: Compile recent announcements
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # Channel ids aren't secret; a repo/org Actions *variable* is the
+          # right place for them, not a secret.
+          SLACK_CHANNEL_IDS: ${{ vars.SLACK_CHANNEL_IDS }}
+        run: policyctl compile --slack --since-days 2
+
+      - name: Open a PR with anything compiled
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "policyctl compile: proposed artifacts"
+          title: "Compiled policy from recent Slack announcements"
+          body: |
+            Opened by the nightly `policyctl compile` run. Everything here
+            lands as `status: proposed` and enforces nothing until merged --
+            check each rule against the announcement its `source.excerpt`
+            cites before approving.
+
+            An amended artifact in this diff was already `active`; merging
+            moves what it enforces immediately (see the `amendments` entry
+            added to it for which message caused the change).
+          branch: policyctl/compile
+          add-paths: registry/**
+          delete-branch: true

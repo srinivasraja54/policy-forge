@@ -118,7 +118,7 @@ class TestCheckOutput:
         res = invoke(workspace, "check", "--root", str(workspace), "--no-record",
                      "--repo", "payments-api")
         assert "fires in window" in res.stdout
-        assert "2026-10-03 03:00" in res.stdout
+        assert "2037-10-03 03:00" in res.stdout
 
     def test_dependency_gate_keeps_web_ui_clear(self, workspace):
         res = invoke(workspace, "check", "--root", str(workspace), "--no-record",
@@ -251,6 +251,46 @@ class TestCompileCommand:
         ])
         assert res.exit_code == 2
         assert "--stub" in res.stdout
+
+    def test_slack_without_config_exits_two_with_a_hint(self, bare, monkeypatch):
+        monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("SLACK_CHANNEL_IDS", raising=False)
+        res = runner.invoke(app, [
+            "compile", "--stub", "--slack", "--registry", str(bare / "registry"),
+        ])
+        assert res.exit_code == 2
+        assert "cannot read Slack" in res.stdout
+
+    def test_slack_and_stub_are_independent(self, bare, monkeypatch):
+        """--slack --stub reads real channel traffic through canned model
+        responses -- the way to smoke-test the connection without spending."""
+        from datetime import datetime, timezone
+
+        from policyforge.schema import SourceType
+        from policyforge.sources.base import Message
+
+        class _FakeSlackSource:
+            name = "slack"
+            channels = ["C0TEST"]
+
+            def __init__(self, *a, **k):
+                pass
+
+            def fetch(self, since):
+                yield Message(
+                    ref="C0TEST/p1", text="the coffee machine is broken",
+                    posted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    source_type=SourceType.SLACK,
+                )
+
+        monkeypatch.setattr("policyforge.sources.slack.SlackSource", _FakeSlackSource)
+        res = runner.invoke(app, [
+            "compile", "--stub", "--slack", "--registry", str(bare / "registry"),
+            "--since-days", "400",
+        ])
+        assert res.exit_code == 0
+        assert "reading Slack channel(s) C0TEST" in res.stdout
+        assert "1 message(s): 0 compiled" in res.stdout
 
 
 class TestRemediateCommand:

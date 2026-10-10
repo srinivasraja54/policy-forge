@@ -46,13 +46,13 @@ One message, two obligations, a deadline. It compiles to [`registry/policies/art
 ```console
 $ policyctl check
 
-artifactory-upgrade-2026-10-03 event/high
+artifactory-upgrade-2037-10-03 event/high
   violating   payments-api   jobs-in-window   n=1
       .github/workflows/nightly.yml:4  0 3 * * *
-        nightly-build fires in window: 2026-10-03 03:00 UTC
+        nightly-build fires in window: 2037-10-03 03:00 UTC
   violating   data-platform  jobs-in-window   n=2
       .github/workflows/retrain.yml:4  0 4 * * 6
-        weekly-retrain fires in window: 2026-10-03 04:00 UTC
+        weekly-retrain fires in window: 2037-10-03 04:00 UTC
   clear       web-ui         jobs-in-window
 
 artifactory-docker-passthrough-2027-01 policy/blocking
@@ -82,7 +82,7 @@ $ policyctl compile --stub
                                                                 and digest pinning.
  00000101   noise                                               A reader asking a clarifying
                                                                 question; imposes nothing.
- 00000200   compiled      artifactory-upgrade-2026-10-03        Window taken verbatim. Dependency
+ 00000200   compiled      artifactory-upgrade-2037-10-03        Window taken verbatim. Dependency
                                                                 gate set so unrelated jobs are not
                                                                 reported.
  00000400   noise                                               Office facilities notice.
@@ -158,14 +158,14 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
 - [x] **Phase 2.5** — amendments applied, not just reported: thread-resolved targets, provenance trail
   - dedupe and resolution now read entirely off the registry (`Registry.source_refs()`) — no ledger, no database; durable across a fresh CI checkout where a `.gitignore`d `ledger.sqlite` would not be
-- [ ] **Phase 3** — Slack ingestion (the `SourceAdapter` seam is already in place)
+- [x] **Phase 3** — Slack ingestion: `policyctl compile --slack` reads real channel history and threads through the same `SourceAdapter` seam `FixtureSource` always used. Unit-tested against a mocked Slack API (`httpx.MockTransport`, no network in CI); not yet run against a live workspace.
 - [~] **Phase 4** — GitHub output (draft PRs, issues)
   - [x] autofix applier + `verify` runner: `policyctl remediate` computes a diff from the rule's own `detect.regex`, runs `verify` in a throwaway copy of the repo, and writes only what passed — no model calls
   - [ ] GitHub client: open the verified diff as a draft PR (needs `GITHUB_TOKEN`)
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
-- [ ] **Phase 6** — GitHub Actions: nightly compile, enforce-on-push
+- [~] **Phase 6** — GitHub Actions: `.github/workflows/` has `ci.yml` (tests, runs today), `enforce.yml` (enforce-on-push against the bundled fixtures, zero model calls, runs today), and `compile.yml` (nightly `policyctl compile --slack` → PR; needs `ANTHROPIC_API_KEY` + `SLACK_BOT_TOKEN` as repo secrets). Drafted, not yet verified against a live run. See [`docs/workflows.md`](docs/workflows.md), which also documents the template for enforcing this registry in a separate, downstream repo.
 
-_244 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
+_269 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md) · [workflows](docs/workflows.md)._
 
 ## Quickstart
 
@@ -194,6 +194,22 @@ policyctl compile                 # .env is loaded automatically; drop --stub
 `.env` is only ever read on this path — `check` and `validate` need no key, no
 network, and no service, and nothing about them changes whether or not `.env`
 exists.
+
+Reading real Slack channels instead of the bundled fixture:
+
+```bash
+pip install -e ".[dev,slack]"      # adds httpx + python-dotenv
+# .env: SLACK_BOT_TOKEN=xoxb-..., SLACK_CHANNEL_IDS=C01234567,C07654321
+policyctl compile --slack --stub   # real channel traffic, canned model responses --
+                                    # the way to smoke-test the connection for free
+policyctl compile --slack          # the real thing
+```
+
+The bot needs `channels:history` (or `groups:history`), and to actually be a
+member of each configured channel — Slack returns no history for a channel a
+bot hasn't joined. `users:read` and `team:read` are optional: without them, a
+message's author falls back to its raw Slack user id and its `permalink` is
+left unset, both quietly, never a failed run.
 
 `policyctl check` prints which search backend it used. It prefers ripgrep and falls
 back to a pure-Python walk when no binary is found — set `$POLICYFORGE_RG` if `rg` on
@@ -227,11 +243,14 @@ src/policyforge/
   sources/
     base.py           SourceAdapter protocol — Slack/postmortem/maintenance all
     fixture.py        reduce to one Message shape
+    slack.py          the real Web API, reduced to the same shape
   remediate/
     applier.py        Autofix + Finding → FileChange, from the rule's own regex
     verify.py         run `verify` in a throwaway copy of the repo — the oracle
   cli.py           policyctl
 docs/artifacts.md  artifact schema reference — read this to author one by hand
+docs/workflows.md  what each GitHub Action does, and the downstream-repo template
 registry/          the artifacts themselves — reviewed as PRs
 fixtures/repos/    sample repos the engine runs against
+.github/workflows/ ci.yml, enforce.yml, compile.yml — see docs/workflows.md
 ```
