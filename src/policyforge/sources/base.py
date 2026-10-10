@@ -5,8 +5,9 @@ are different *inputs* to one compiler, not three separate systems -- so the
 interface is narrow and every adapter reduces to the same `Message` shape.
 
 `ref` is the contract that makes the pipeline cheap: it is the stable dedupe key
-the ledger records, so a thread already seen is skipped by a SQLite lookup rather
-than by asking a model to recognise it again.
+recorded on whatever artifact a thread produces (see `Registry.source_refs()`),
+so a thread already compiled or amended is skipped by a dict lookup rather than
+by asking a model to recognise it again.
 """
 
 from __future__ import annotations

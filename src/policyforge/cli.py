@@ -43,11 +43,15 @@ _MARK = {
 def _load_dotenv() -> None:
     """Populate the environment from `.env`, if present.
 
-    Only called from the `compile` command's real-model path -- `check` and
-    `validate` must keep working with no key, no network and no service, so
-    they never touch this. Soft dependency: `python-dotenv` ships with the
-    `compile` extra, but a shell that already exports ANTHROPIC_API_KEY works
-    with or without it, so a missing package is silent, not an error.
+    Only called from `compile` -- `check` and `validate` must keep working
+    with no key, no network and no service, so they never touch this. Safe to
+    call regardless of `--stub` / `--slack`: it is a no-op with nothing to
+    read or nothing new to set (`override=False`), so it covers whichever of
+    ANTHROPIC_API_KEY / SLACK_BOT_TOKEN this particular run actually needs
+    without having to ask which. Soft dependency: `python-dotenv` ships with
+    the `compile` and `slack` extras, but a shell that already exports the
+    variable works with or without it, so a missing package is silent, not an
+    error.
     """
     try:
         from dotenv import load_dotenv
@@ -405,7 +409,12 @@ def brief(
 @app.command()
 def compile(
     source_path: Path = typer.Option(Path("fixtures/slack"), "--source", "-s",
-                                     help="Directory of fixture messages."),
+                                     help="Directory of fixture messages. Ignored with --slack."),
+    slack: bool = typer.Option(
+        False, "--slack",
+        help="Read from Slack instead of the fixture source. Needs "
+        "SLACK_BOT_TOKEN and SLACK_CHANNEL_IDS (.env or the environment).",
+    ),
     registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
     since_days: int = typer.Option(1, "--since-days", help="Look-back window."),
     stub: bool = typer.Option(False, "--stub", help="Use canned responses; no API key."),
@@ -426,9 +435,13 @@ def compile(
     `--since-days` sees it again; that costs one cheap call, which is the
     trade this design makes instead of depending on a ledger file surviving
     between CI runs.
+
+    `--slack` and `--stub` are independent: `--slack --stub` reads real
+    channel traffic through canned model responses, which is the way to
+    smoke-test the Slack connection itself without spending on the model.
     """
+    _load_dotenv()  # harmless if .env or python-dotenv is absent either way
     from .compiler import Engine, Pipeline
-    from .sources.fixture import FixtureSource
 
     if stub:
         from .compiler.stub import StubClient
@@ -436,7 +449,6 @@ def compile(
         client = StubClient()
         console.print("[dim]using stubbed model responses -- no API calls[/dim]")
     else:
-        _load_dotenv()
         from .compiler import AnthropicClient
 
         try:
@@ -447,15 +459,29 @@ def compile(
             raise typer.Exit(code=2)
 
     since = datetime.now(timezone.utc) - timedelta(days=since_days)
+
+    if slack:
+        from .sources.slack import SlackSource
+
+        try:
+            source = SlackSource()
+        except ValueError as exc:
+            console.print(f"[red]cannot read Slack:[/red] {exc}")
+            raise typer.Exit(code=2)
+        console.print(f"[dim]reading Slack channel(s) {', '.join(source.channels)} "
+                      f"since {since:%Y-%m-%d %H:%M}Z[/dim]")
+    else:
+        from .sources.fixture import FixtureSource
+
+        source = FixtureSource(source_path)
+        console.print(f"[dim]reading {source_path} since {since:%Y-%m-%d %H:%M}Z[/dim]")
+
     pipeline = Pipeline(
         engine=Engine(client=client),
         registry_root=registry,
         min_confidence=min_confidence,
     )
-
-    console.print(f"[dim]reading {source_path} since {since:%Y-%m-%d %H:%M}Z[/dim]")
-    report = pipeline.run(FixtureSource(source_path), since,
-                          dry_run=dry_run, limit=limit)
+    report = pipeline.run(source, since, dry_run=dry_run, limit=limit)
 
     table = Table(title="compilation", header_style="bold")
     for col in ("ref", "disposition", "artifact", "why"):
