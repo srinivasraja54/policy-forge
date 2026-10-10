@@ -182,13 +182,41 @@ GitHub Actions cron is always UTC. Kubernetes CronJob is UTC unless
 
 | Type | Effect |
 |---|---|
-| `prefix_rewrite` | Prepend `to` to the matched reference. |
-| `regex_replace` | `pattern` → `replacement`. |
-| `shift_schedule` | Move a cron by `by_hours`, optionally reverting after `revert_after`. |
+| `prefix_rewrite` | Prepend `to` right where the rule's own `detect.regex` stopped matching. |
+| `regex_replace` | `pattern` → `replacement`, its own pattern, not necessarily the detector's. |
+| `shift_schedule` | Move a cron by `by_hours`, optionally reverting after `revert_after`. Not yet automated — see below. |
 | `manual` | No safe mechanical fix; `instructions` become the issue body. |
 
 Choosing `manual` is a legitimate and often correct outcome. A fix that cannot be
 verified should be described to a human, not guessed at.
+
+### Applying an autofix: `policyctl remediate`
+
+`prefix_rewrite` and `regex_replace` are computed by `policyforge.remediate`, with
+no model call: the fix is a mechanical consequence of `detect.regex` finding the
+violation in the first place, never a second, independent guess at what it means.
+Two safeguards keep that honest:
+
+- **The fix must clear its own detector.** After applying it, the rule's
+  `detect.regex` is re-run against the result; if it still matches, the fix is
+  refused rather than written. This is a free oracle — no `verify` command needed
+  to catch a `prefix_rewrite`/`detect.regex` pair that disagree with each other.
+- **A matched reference that is itself a build variable** (`$BASE_IMAGE`,
+  `${BASE_IMAGE}`) is refused for `prefix_rewrite`, never mechanically rewritten.
+  Prepending a mirror prefix there would silently break the interpolation rather
+  than fix it — exactly the `FROM $BASE_IMAGE` case called out earlier in this
+  repo's own fixtures.
+
+A computed fix is written to the real repository only when `rule.verify` is set
+**and** passes, run against a throwaway copy of the repo — `policyctl remediate`
+never touches the real checkout otherwise, `--write` or not. A rule with no
+`verify` stays diff-only regardless of the flag: without that oracle there is
+nothing to trust over a human's own reading of the diff, the same principle that
+already governs the choice of `manual` above.
+
+`shift_schedule` (for `schedule_intersects` rules) is not yet wired up to
+`policyctl remediate` — rewriting a cron expression safely needs YAML-aware
+editing, not line regex, and is a planned follow-up.
 
 ## Authoring by hand
 

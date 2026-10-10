@@ -252,3 +252,137 @@ class TestCompileCommand:
         ])
         assert res.exit_code == 2
         assert "--stub" in res.stdout
+
+
+class TestRemediateCommand:
+    """`policyctl remediate` writes to a real checkout, so its default must be
+    inert: show what would change, apply nothing, unless --write AND verify
+    both say yes."""
+
+    def _policy(self, *, autofix: dict, verify: str | None = None) -> dict:
+        return {
+            "schema_version": 1, "kind": "policy", "id": "demo-policy",
+            "title": "t", "status": "active", "severity": "warn",
+            "source": {"type": "manual", "ref": "x",
+                       "captured_at": "2026-01-01T00:00:00Z"},
+            "rules": [{
+                "id": "no-latest", "description": "d",
+                "detect": {"type": "file_pattern", "globs": ["**/Dockerfile"],
+                           "regex": r"^FROM\s+(?!mirror/)"},
+                "autofix": autofix,
+                **({"verify": verify} if verify else {}),
+            }],
+        }
+
+    @pytest.fixture
+    def demo(self, tmp_path: Path):
+        """A minimal, self-contained registry + repo -- deliberately not the
+        shared fixtures, so these tests do not depend on docker being
+        installed or running."""
+        (tmp_path / "registry" / "policies").mkdir(parents=True)
+        (tmp_path / "repo").mkdir()
+        (tmp_path / "registry" / "catalog.yaml").write_text(
+            yaml.dump({"repos": [{"name": "demo", "path": "repo", "team": "x"}]})
+        )
+        (tmp_path / "repo" / "Dockerfile").write_text("FROM ubuntu:latest\n")
+        return tmp_path
+
+    def _write_policy(self, demo: Path, policy: dict) -> None:
+        (demo / "registry" / "policies" / "demo-policy.json").write_text(
+            json.dumps(policy)
+        )
+
+    def _run(self, demo: Path, *extra: str):
+        return runner.invoke(app, [
+            "remediate", "--registry", str(demo / "registry"),
+            "--root", str(demo), *extra,
+        ])
+
+    def test_dry_run_shows_the_diff_and_writes_nothing(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+        res = self._run(demo)
+        assert res.exit_code == 0
+        assert "+FROM mirror/ubuntu:latest" in res.stdout
+        assert "verify passed" in res.stdout
+        assert "0 written" in res.stdout
+        assert (demo / "repo" / "Dockerfile").read_text() == "FROM ubuntu:latest\n"
+
+    def test_write_applies_a_fix_that_passes_verify(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+        res = self._run(demo, "--write")
+        assert "1 written" in res.stdout
+        assert (demo / "repo" / "Dockerfile").read_text() == "FROM mirror/ubuntu:latest\n"
+
+    def test_write_does_not_apply_a_fix_that_fails_verify(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="exit 1",
+        ))
+        res = self._run(demo, "--write")
+        assert "verify failed" in res.stdout
+        assert "0 written" in res.stdout
+        assert (demo / "repo" / "Dockerfile").read_text() == "FROM ubuntu:latest\n"
+
+    def test_a_rule_with_no_verify_is_never_written_even_with_write(self, demo):
+        """No flag can skip the oracle -- a computed fix with nothing to
+        confirm it stays diff-only, by design, not by omission."""
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+        ))
+        res = self._run(demo, "--write")
+        assert "no verify command set" in res.stdout
+        assert "0 written" in res.stdout
+        assert (demo / "repo" / "Dockerfile").read_text() == "FROM ubuntu:latest\n"
+
+    def test_manual_autofix_is_reported_not_attempted(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "manual", "instructions": "fix it by hand"},
+        ))
+        res = self._run(demo)
+        assert "cannot autofix" in res.stdout
+        assert "manual-only" in res.stdout
+
+    def test_a_clean_repo_computes_nothing(self, demo):
+        (demo / "repo" / "Dockerfile").write_text("FROM mirror/ubuntu:latest\n")
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="true",
+        ))
+        res = self._run(demo)
+        assert "0 fix(es) computed" in res.stdout
+
+    def test_no_enforceable_artifacts(self, demo):
+        res = self._run(demo)
+        assert "no enforceable artifacts" in res.stdout
+
+    def test_unknown_repo_filter_reports_no_targets(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+        ))
+        res = self._run(demo, "--repo", "nope")
+        assert "no targets" in res.stdout
+
+    def test_a_rule_with_no_autofix_is_silently_left_alone(self, demo):
+        """Not every violating rule has an autofix -- remediate must not print
+        anything for one, since there is nothing for it to propose."""
+        policy = self._policy(autofix={"type": "manual", "instructions": "x"})
+        del policy["rules"][0]["autofix"]
+        self._write_policy(demo, policy)
+        res = self._run(demo)
+        assert "no-latest" not in res.stdout
+        assert "0 fix(es) computed" in res.stdout
+
+    def test_verify_failure_output_is_shown(self, demo):
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="echo something went wrong >&2; exit 1",
+        ))
+        res = self._run(demo, "--write")
+        assert "verify failed" in res.stdout
+        assert "something went wrong" in res.stdout

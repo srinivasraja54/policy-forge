@@ -155,11 +155,13 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [x] **Phase 2** — the compiler: Haiku triage → Opus compile, structured outputs, review gate
 - [x] **Phase 2.5** — amendments applied, not just reported: thread-resolved targets, provenance trail
 - [ ] **Phase 3** — Slack ingestion (the `SourceAdapter` seam is already in place)
-- [ ] **Phase 4** — GitHub output (draft PRs, issues)
+- [~] **Phase 4** — GitHub output (draft PRs, issues)
+  - [x] autofix applier + `verify` runner: `policyctl remediate` computes a diff from the rule's own `detect.regex`, runs `verify` in a throwaway copy of the repo, and writes only what passed — no model calls
+  - [ ] GitHub client: open the verified diff as a draft PR (needs `GITHUB_TOKEN`)
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
 - [ ] **Phase 6** — GitHub Actions: nightly compile, enforce-on-push
 
-_188 tests, 96% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
+_244 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md)._
 
 ## Quickstart
 
@@ -170,6 +172,7 @@ pip install -e ".[dev]"
 policyctl compile --stub    # compile fixture announcements — no API key needed
 policyctl validate          # validate every artifact in the registry
 policyctl check             # enforce against the fixture repos
+policyctl remediate         # compute + verify fixes for violations with an autofix
 policyctl report            # compliance burndown
 policyctl brief payments    # one morning digest for a team
 ```
@@ -204,6 +207,9 @@ src/policyforge/
   sources/
     base.py           SourceAdapter protocol — Slack/postmortem/maintenance all
     fixture.py        reduce to one Message shape
+  remediate/
+    applier.py        Autofix + Finding → FileChange, from the rule's own regex
+    verify.py         run `verify` in a throwaway copy of the repo — the oracle
   cli.py           policyctl
 docs/artifacts.md  artifact schema reference — read this to author one by hand
 registry/          the artifacts themselves — reviewed as PRs

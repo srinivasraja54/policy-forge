@@ -194,6 +194,125 @@ def check(
 
 
 @app.command()
+def remediate(
+    registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
+    repo: list[str] = typer.Option(None, "--repo", help="Limit to named repos."),
+    root: Path = typer.Option(Path("."), "--root", help="Base path for catalog paths."),
+    write: bool = typer.Option(
+        False, "--write",
+        help="Apply fixes whose `verify` command passed. Without this, diffs "
+        "are computed and shown but nothing is written.",
+    ),
+) -> None:
+    """Propose mechanical fixes for active, violating rules that declare an autofix.
+
+    Every fix is computed offline from the rule's own `detect.regex` -- never a
+    second, independent guess at what the violation is -- then, where the rule
+    sets a `verify` command, run against a throwaway copy of the repo before
+    anything touches the real checkout.
+
+    A rule with no `verify` is diff-only, with or without `--write`: this tool
+    does not apply a fix it cannot also confirm. That absence is the same
+    signal `docs/artifacts.md` already documents for `manual` autofixes --
+    "a fix that cannot be verified should be described to a human, not guessed
+    at" -- extended to the case where a fix exists but nothing proves it right.
+    """
+    from .detect.base import Outcome
+    from .remediate import RemediationError, plan_fix, verify_in_sandbox
+
+    reg = _load(registry)
+    targets = _targets(reg, repo, root)
+    if not targets:
+        console.print("[yellow]no targets to check[/yellow]")
+        raise typer.Exit(code=0)
+
+    now = datetime.now(timezone.utc)
+    enforceable = reg.enforceable(now)
+    if not enforceable:
+        console.print("[dim]no enforceable artifacts (none active, or all expired)[/dim]")
+        raise typer.Exit(code=0)
+
+    fixable = written = unverified = skipped_n = 0
+
+    for art in enforceable:
+        for target in targets:
+            for res in evaluate_artifact(art, target, now):
+                if res.outcome is not Outcome.VIOLATING:
+                    continue
+                rule = next((r for r in art.rules if r.id == res.rule_id), None)
+                if rule is None or rule.autofix is None:
+                    continue
+
+                try:
+                    changes, skipped = plan_fix(rule, target, res.findings)
+                except RemediationError as exc:
+                    console.print(
+                        f"\n[bold]{art.id}[/bold] / {rule.id} [dim]({target.name})[/dim]"
+                    )
+                    console.print(f"  [yellow]cannot autofix:[/yellow] {exc}")
+                    continue
+
+                if not changes and not skipped:
+                    continue
+
+                console.print(f"\n[bold]{art.id}[/bold] / {rule.id} [dim]({target.name})[/dim]")
+                for s in skipped:
+                    console.print(f"  [yellow]skip[/yellow] {s.file}: {s.reason}")
+                    skipped_n += 1
+                if not changes:
+                    continue
+
+                # Every FileChange plan_fix returns is guaranteed to actually
+                # differ from `before`: its self-check already confirmed the
+                # detector's own regex no longer matches `after`, and it did
+                # match `before` -- that is where the Finding came from. No
+                # separate "is this a no-op" filter is needed here.
+                for change in changes:
+                    console.print(f"  [cyan]{change.path}[/cyan]")
+                    for line in change.unified_diff().splitlines():
+                        colour = (
+                            "green" if line.startswith("+") and not line.startswith("+++")
+                            else "red" if line.startswith("-") and not line.startswith("---")
+                            else "dim"
+                        )
+                        console.print(f"    [{colour}]{line}[/{colour}]")
+
+                fixable += len(changes)
+
+                if rule.verify is None:
+                    console.print(
+                        "  [yellow]no verify command set -- review and apply by "
+                        "hand[/yellow]"
+                    )
+                    unverified += len(changes)
+                    continue
+
+                result = verify_in_sandbox(target.path, changes, rule.verify)
+                if not result.passed:
+                    why = "timed out" if result.timed_out else f"exit {result.returncode}"
+                    console.print(f"  [red]verify failed[/red] ({why}): {rule.verify}")
+                    tail = (result.stderr or result.stdout).strip().splitlines()
+                    if tail:
+                        console.print(f"    [dim]{tail[-1]}[/dim]")
+                    continue
+
+                console.print(f"  [green]verify passed[/green]: {rule.verify}")
+                if write:
+                    for change in changes:
+                        (target.path / change.path).write_text(change.after)
+                    console.print(f"  [bold green]written[/bold green] "
+                                  f"({len(changes)} file(s))")
+                    written += len(changes)
+
+    console.print(
+        f"\n{fixable} fix(es) computed, [bold green]{written} written[/bold green], "
+        f"{unverified} need manual review (no verify), {skipped_n} file(s) skipped"
+    )
+    if not write and fixable > written:
+        console.print("[dim]dry run -- rerun with --write to apply fixes that pass verify[/dim]")
+
+
+@app.command()
 def report(
     registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
     ledger_path: Path = typer.Option(DEFAULT_LEDGER, "--ledger", "-l"),
