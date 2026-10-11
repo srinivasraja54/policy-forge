@@ -434,6 +434,10 @@ class TestRemediateCommand:
 
     def test_pr_without_github_token_exits_two(self, demo, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        # A real .env with a real GITHUB_TOKEN (as a developer actually using
+        # --pr would have) would otherwise undo the deletion above the moment
+        # compile() -- here, remediate() -- calls _load_dotenv().
+        monkeypatch.setattr("policyforge.cli._load_dotenv", lambda: None)
         self._write_policy(demo, self._policy(
             autofix={"type": "prefix_rewrite", "to": "mirror/"},
             verify="grep -q mirror/ Dockerfile",
