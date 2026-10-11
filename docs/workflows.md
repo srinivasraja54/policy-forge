@@ -130,7 +130,7 @@ check — is `policyctl remediate --pr`'s job, with the same two-checkout shape:
 policyctl remediate --registry policy-forge/registry --root repo \
   --repo "$(basename "$GITHUB_REPOSITORY")" --pr
 ```
-It needs `GITHUB_TOKEN` (see `.env.example`) and nothing else repo-specific —
+It needs `POLICYFORGE_GITHUB_TOKEN` (see `.env.example`) and nothing else repo-specific —
 the target's own `origin` remote decides which GitHub repo the PR opens
 against, read straight from the checkout at `repo/`. See
 [`docs/artifacts.md`](artifacts.md#applying-an-autofix-policyctl-remediate) for

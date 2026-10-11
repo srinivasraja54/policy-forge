@@ -224,7 +224,7 @@ the same semantics by a parity test suite.
 sets a `verify` command, runs it in a throwaway copy of the repo — never the real
 checkout. `--write` applies a fix locally only once that verify has passed; `--pr`
 instead pushes it to a dedicated branch in a throwaway clone and opens a draft PR
-(needs `GITHUB_TOKEN` — the target's own git remote decides which repo). A rule
+(needs `POLICYFORGE_GITHUB_TOKEN` — the target's own git remote decides which repo). A rule
 with no `verify` stays diff-only regardless of either flag; there is no flag that
 skips the oracle.
 

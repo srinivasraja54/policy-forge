@@ -212,7 +212,7 @@ def remediate(
     pr: bool = typer.Option(
         False, "--pr",
         help="Open a PR for fixes whose `verify` command passed, instead of "
-        "writing locally. Needs GITHUB_TOKEN (.env or the environment); the "
+        "writing locally. Needs POLICYFORGE_GITHUB_TOKEN (.env or the environment); the "
         "target's own git remote decides which repo it opens against.",
     ),
 ) -> None:
@@ -243,9 +243,9 @@ def remediate(
         _load_dotenv()
         from .remediate.github import GitHubError, open_fix_pr
 
-        token = os.environ.get("GITHUB_TOKEN")
+        token = os.environ.get("POLICYFORGE_GITHUB_TOKEN")
         if not token:
-            console.print("[red]cannot open a PR:[/red] GITHUB_TOKEN is not set")
+            console.print("[red]cannot open a PR:[/red] POLICYFORGE_GITHUB_TOKEN is not set")
             raise typer.Exit(code=2)
         led = Ledger(ledger_path)
 

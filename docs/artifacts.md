@@ -215,7 +215,7 @@ there, both gated by that same pass:
 - `--pr` pushes it to a dedicated branch (`policyctl/<artifact.id>/<rule.id>`,
   force-pushed — the branch is understood to belong entirely to this tool) in a
   throwaway clone and opens a PR, using the checkout's own `origin` remote to
-  know which repo and `GITHUB_TOKEN` to authenticate. Idempotent per
+  know which repo and `POLICYFORGE_GITHUB_TOKEN` to authenticate. Idempotent per
   (artifact, rule, repo) via the ledger's `actions` table: a fix already opened
   as a PR is skipped on a later run, not reopened.
 

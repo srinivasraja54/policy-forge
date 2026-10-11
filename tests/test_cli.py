@@ -433,8 +433,8 @@ class TestRemediateCommand:
     # ---- --pr --------------------------------------------------------------
 
     def test_pr_without_github_token_exits_two(self, demo, monkeypatch):
-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-        # A real .env with a real GITHUB_TOKEN (as a developer actually using
+        monkeypatch.delenv("POLICYFORGE_GITHUB_TOKEN", raising=False)
+        # A real .env with a real POLICYFORGE_GITHUB_TOKEN (as a developer actually using
         # --pr would have) would otherwise undo the deletion above the moment
         # compile() -- here, remediate() -- calls _load_dotenv().
         monkeypatch.setattr("policyforge.cli._load_dotenv", lambda: None)
@@ -444,7 +444,7 @@ class TestRemediateCommand:
         ))
         res = self._run(demo, "--pr")
         assert res.exit_code == 2
-        assert "GITHUB_TOKEN" in res.stdout
+        assert "POLICYFORGE_GITHUB_TOKEN" in res.stdout
 
     def test_pr_opens_a_pull_request_and_records_it_in_the_ledger(self, demo, monkeypatch):
         from policyforge.ledger import Ledger
@@ -458,7 +458,7 @@ class TestRemediateCommand:
                                      number=1, created=True)
 
         monkeypatch.setattr("policyforge.remediate.github.open_fix_pr", fake_open_fix_pr)
-        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        monkeypatch.setenv("POLICYFORGE_GITHUB_TOKEN", "tok123")
         self._write_policy(demo, self._policy(
             autofix={"type": "prefix_rewrite", "to": "mirror/"},
             verify="grep -q mirror/ Dockerfile",
@@ -484,7 +484,7 @@ class TestRemediateCommand:
         calls = []
         monkeypatch.setattr("policyforge.remediate.github.open_fix_pr",
                             lambda **kw: calls.append(kw))
-        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        monkeypatch.setenv("POLICYFORGE_GITHUB_TOKEN", "tok123")
         self._write_policy(demo, self._policy(
             autofix={"type": "prefix_rewrite", "to": "mirror/"},
             verify="grep -q mirror/ Dockerfile",
@@ -507,7 +507,7 @@ class TestRemediateCommand:
             raise GitHubError("401 bad credentials")
 
         monkeypatch.setattr("policyforge.remediate.github.open_fix_pr", fail)
-        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        monkeypatch.setenv("POLICYFORGE_GITHUB_TOKEN", "tok123")
         self._write_policy(demo, self._policy(
             autofix={"type": "prefix_rewrite", "to": "mirror/"},
             verify="grep -q mirror/ Dockerfile",
