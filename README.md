@@ -8,6 +8,23 @@ Everything after it is pattern matching and calendar arithmetic — no model cal
 
 ---
 
+**At a glance** — what's real today, verified against live systems rather than
+fixtures, and what isn't built:
+
+| | |
+|---|---|
+| Compile a Slack announcement into an executable policy | ✅ Built — verified against a real Slack workspace |
+| Enforce that policy against real repos, zero model calls | ✅ Built — runs as a required check on every push |
+| Amend an obligation a follow-up message changes, instead of duplicating it | ✅ Built |
+| Propose a verified autofix and open a draft PR | ✅ Built — verified as a fully automated GitHub Actions workflow, no human in the loop |
+| Open a GitHub *issue* for a fix that can't be automated | ❌ Not built |
+| Web dashboard / compliance API | ❌ Not built |
+| Fully unattended nightly compilation | ⚠️ Built, intentionally left switched off pending a decision to run it unattended |
+
+Full detail, including exactly what was tested and how: [Status](#status) below.
+
+---
+
 ## The idea
 
 Existing tools — OpsLevel Campaigns, Cortex Scorecards, Spotify Soundcheck — all begin *after* a human has hand-authored a machine-checkable rule. policy-forge automates the authoring step and leaves enforcement deterministic:
