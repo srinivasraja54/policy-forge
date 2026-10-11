@@ -8,6 +8,7 @@ detection-and-nag is not.
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -200,12 +201,19 @@ def check(
 @app.command()
 def remediate(
     registry: Path = typer.Option(DEFAULT_REGISTRY, "--registry", "-r"),
+    ledger_path: Path = typer.Option(DEFAULT_LEDGER, "--ledger", "-l"),
     repo: list[str] = typer.Option(None, "--repo", help="Limit to named repos."),
     root: Path = typer.Option(Path("."), "--root", help="Base path for catalog paths."),
     write: bool = typer.Option(
         False, "--write",
         help="Apply fixes whose `verify` command passed. Without this, diffs "
         "are computed and shown but nothing is written.",
+    ),
+    pr: bool = typer.Option(
+        False, "--pr",
+        help="Open a PR for fixes whose `verify` command passed, instead of "
+        "writing locally. Needs GITHUB_TOKEN (.env or the environment); the "
+        "target's own git remote decides which repo it opens against.",
     ),
 ) -> None:
     """Propose mechanical fixes for active, violating rules that declare an autofix.
@@ -215,14 +223,31 @@ def remediate(
     sets a `verify` command, run against a throwaway copy of the repo before
     anything touches the real checkout.
 
-    A rule with no `verify` is diff-only, with or without `--write`: this tool
-    does not apply a fix it cannot also confirm. That absence is the same
-    signal `docs/artifacts.md` already documents for `manual` autofixes --
-    "a fix that cannot be verified should be described to a human, not guessed
-    at" -- extended to the case where a fix exists but nothing proves it right.
+    A rule with no `verify` is diff-only, with or without `--write` / `--pr`:
+    this tool does not apply or propose a fix it cannot also confirm. That
+    absence is the same signal `docs/artifacts.md` already documents for
+    `manual` autofixes -- "a fix that cannot be verified should be described
+    to a human, not guessed at" -- extended to the case where a fix exists but
+    nothing proves it right.
+
+    `--pr` is idempotent per (artifact, rule, repo) via the ledger's action
+    table, the same mechanism `claim_action` already exists for: a fix already
+    PR'd is skipped on a later run, not reopened. There is currently no
+    automatic retry if opening the PR itself fails after the claim is made --
+    that row has to be cleared by hand before the next run will try again.
     """
     from .detect.base import Outcome
     from .remediate import RemediationError, plan_fix, verify_in_sandbox
+
+    if pr:
+        _load_dotenv()
+        from .remediate.github import GitHubError, open_fix_pr
+
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            console.print("[red]cannot open a PR:[/red] GITHUB_TOKEN is not set")
+            raise typer.Exit(code=2)
+        led = Ledger(ledger_path)
 
     reg = _load(registry)
     targets = _targets(reg, repo, root)
@@ -236,7 +261,7 @@ def remediate(
         console.print("[dim]no enforceable artifacts (none active, or all expired)[/dim]")
         raise typer.Exit(code=0)
 
-    fixable = written = unverified = skipped_n = 0
+    fixable = written = opened = unverified = skipped_n = 0
 
     for art in enforceable:
         for target in targets:
@@ -308,11 +333,31 @@ def remediate(
                                   f"({len(changes)} file(s))")
                     written += len(changes)
 
+                if pr:
+                    if not led.claim_action(art.id, rule.id, target.name, "pull_request"):
+                        console.print("  [dim]PR already opened for this fix[/dim]")
+                        continue
+                    try:
+                        result = open_fix_pr(
+                            repo_path=target.path, artifact=art, rule=rule,
+                            changes=changes, token=token,
+                        )
+                    except GitHubError as exc:
+                        console.print(f"  [red]could not open a PR:[/red] {exc}")
+                        led.close_action(art.id, rule.id, target.name,
+                                         "error", reason=str(exc))
+                        continue
+                    led.attach_url(art.id, rule.id, target.name, result.url)
+                    verb = "opened" if result.created else "already open"
+                    console.print(f"  [bold green]PR {verb}[/bold green]: {result.url}")
+                    opened += 1
+
     console.print(
         f"\n{fixable} fix(es) computed, [bold green]{written} written[/bold green], "
+        f"[bold green]{opened} PR(s) opened[/bold green], "
         f"{unverified} need manual review (no verify), {skipped_n} file(s) skipped"
     )
-    if not write and fixable > written:
+    if not write and not pr and fixable > written:
         console.print("[dim]dry run -- rerun with --write to apply fixes that pass verify[/dim]")
 
 

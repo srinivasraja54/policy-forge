@@ -1,15 +1,18 @@
 """Remediation: turning a detected violation into a candidate fix, and deciding
 whether that fix is trustworthy -- both with zero model calls.
 
-Two steps, deliberately separate:
+Three steps:
 
   applier.py  Autofix + Finding -> FileChange. Mechanical, offline, pure.
   verify.py   Run the rule's `verify` command against the candidate, in a
               throwaway copy of the repo. The oracle; nothing is written to
               the real checkout unless this passes.
-
-Opening a PR with the result is a later step (Phase 4's GitHub client) and
-needs credentials this package does not.
+  github.py   Push a verified fix to a branch and open (or reuse) a PR for
+              it. Needs `GITHUB_TOKEN` and the `github` extra (httpx) --
+              deliberately *not* imported here, so the first two steps (what
+              `policyctl remediate` does without `--pr`) stay dependency-free.
+              Import it directly: `from policyforge.remediate.github import
+              open_fix_pr`.
 """
 
 from __future__ import annotations

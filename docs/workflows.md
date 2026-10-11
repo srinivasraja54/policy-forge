@@ -125,6 +125,16 @@ Two things to get right that are easy to miss:
   nothing to check rather than failing loudly on a typo.
 
 Opening a *fix* as a PR in the downstream repo — rather than only failing the
-check — is `policyctl remediate`'s job, with the same two-checkout shape once
-its GitHub client exists (see the README's Status section: this is the one
-piece of Phase 4 not yet built).
+check — is `policyctl remediate --pr`'s job, with the same two-checkout shape:
+```bash
+policyctl remediate --registry policy-forge/registry --root repo \
+  --repo "$(basename "$GITHUB_REPOSITORY")" --pr
+```
+It needs `GITHUB_TOKEN` (see `.env.example`) and nothing else repo-specific —
+the target's own `origin` remote decides which GitHub repo the PR opens
+against, read straight from the checkout at `repo/`. See
+[`docs/artifacts.md`](artifacts.md#applying-an-autofix-policyctl-remediate) for
+how a fix is computed and verified before it ever reaches this step, and the
+module docstring in `src/policyforge/remediate/github.py` for how idempotency
+works (one branch per rule, force-pushed; the ledger's `actions` table is what
+stops a second run opening a second PR for the same fix).

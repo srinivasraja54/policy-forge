@@ -207,12 +207,21 @@ Two safeguards keep that honest:
   than fix it — exactly the `FROM $BASE_IMAGE` case called out earlier in this
   repo's own fixtures.
 
-A computed fix is written to the real repository only when `rule.verify` is set
-**and** passes, run against a throwaway copy of the repo — `policyctl remediate`
-never touches the real checkout otherwise, `--write` or not. A rule with no
-`verify` stays diff-only regardless of the flag: without that oracle there is
-nothing to trust over a human's own reading of the diff, the same principle that
-already governs the choice of `manual` above.
+A computed fix only ever reaches a repository once `rule.verify` is set **and**
+passes, run against a throwaway copy of the repo first. Two ways to land it from
+there, both gated by that same pass:
+
+- `--write` applies it directly to the real local checkout.
+- `--pr` pushes it to a dedicated branch (`policyctl/<artifact.id>/<rule.id>`,
+  force-pushed — the branch is understood to belong entirely to this tool) in a
+  throwaway clone and opens a PR, using the checkout's own `origin` remote to
+  know which repo and `GITHUB_TOKEN` to authenticate. Idempotent per
+  (artifact, rule, repo) via the ledger's `actions` table: a fix already opened
+  as a PR is skipped on a later run, not reopened.
+
+A rule with no `verify` stays diff-only regardless of either flag: without that
+oracle there is nothing to trust over a human's own reading of the diff, the
+same principle that already governs the choice of `manual` above.
 
 `shift_schedule` (for `schedule_intersects` rules) is not yet wired up to
 `policyctl remediate` — rewriting a cron expression safely needs YAML-aware

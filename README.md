@@ -161,11 +161,12 @@ The naive design — feed 24h of Slack plus repo contents to a large model night
 - [x] **Phase 3** — Slack ingestion: `policyctl compile --slack` reads real channel history and threads through the same `SourceAdapter` seam `FixtureSource` always used. Unit-tested against a mocked Slack API (`httpx.MockTransport`, no network in CI) *and* verified against a live workspace: a real announcement posted to a real channel was fetched, triaged and compiled by the real model, promoted to `active`, and correctly flagged real violations via `policyctl check` — the whole loop, no stub anywhere.
 - [~] **Phase 4** — GitHub output (draft PRs, issues)
   - [x] autofix applier + `verify` runner: `policyctl remediate` computes a diff from the rule's own `detect.regex`, runs `verify` in a throwaway copy of the repo, and writes only what passed — no model calls
-  - [ ] GitHub client: open the verified diff as a draft PR (needs `GITHUB_TOKEN`)
+  - [x] GitHub client: `policyctl remediate --pr` pushes a verified fix to a dedicated branch in a throwaway clone and opens a draft PR — the target's own git remote decides which repo, no new catalog field needed. Idempotent via the ledger's `claim_action`/`attach_url` (built since Phase 1, finally has a caller). Unit-tested against a real local git repo plus a mocked GitHub API (`httpx.MockTransport`, no network in CI); not yet run against a live GitHub repo.
+  - [ ] Issues: `docs/artifacts.md` already documents that a `manual` autofix's `instructions` are meant to become "the issue body" — opening that issue isn't built; a `manual` rule is still reported to the terminal only.
 - [ ] **Phase 5** — FastAPI: burndown, team brief, Slack query endpoint
 - [~] **Phase 6** — GitHub Actions: `.github/workflows/` has `ci.yml` (tests, runs today), `enforce.yml` (enforce-on-push against the bundled fixtures, zero model calls, runs today), and `compile.yml` (nightly `policyctl compile --slack` → PR; needs `ANTHROPIC_API_KEY` + `SLACK_BOT_TOKEN` as repo secrets). Drafted, not yet verified against a live run. See [`docs/workflows.md`](docs/workflows.md), which also documents the template for enforcing this registry in a separate, downstream repo.
 
-_269 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md) · [workflows](docs/workflows.md)._
+_299 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [compilation](docs/compiling.md) · [workflows](docs/workflows.md)._
 
 ## Quickstart
 
@@ -221,9 +222,11 @@ the same semantics by a parity test suite.
 
 `policyctl remediate` is dry-run by default: it computes a diff and, where the rule
 sets a `verify` command, runs it in a throwaway copy of the repo — never the real
-checkout. `--write` applies a fix only once that verify has passed. A rule with no
-`verify` stays diff-only regardless of `--write`; there is no flag that skips the
-oracle.
+checkout. `--write` applies a fix locally only once that verify has passed; `--pr`
+instead pushes it to a dedicated branch in a throwaway clone and opens a draft PR
+(needs `GITHUB_TOKEN` — the target's own git remote decides which repo). A rule
+with no `verify` stays diff-only regardless of either flag; there is no flag that
+skips the oracle.
 
 ## Layout
 
@@ -248,6 +251,7 @@ src/policyforge/
   remediate/
     applier.py        Autofix + Finding → FileChange, from the rule's own regex
     verify.py         run `verify` in a throwaway copy of the repo — the oracle
+    github.py         push a verified fix to a branch, open (or reuse) a PR
   cli.py           policyctl
 docs/artifacts.md  artifact schema reference — read this to author one by hand
 docs/workflows.md  what each GitHub Action does, and the downstream-repo template

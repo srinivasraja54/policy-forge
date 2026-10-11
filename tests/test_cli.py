@@ -429,3 +429,93 @@ class TestRemediateCommand:
         res = self._run(demo, "--write")
         assert "verify failed" in res.stdout
         assert "something went wrong" in res.stdout
+
+    # ---- --pr --------------------------------------------------------------
+
+    def test_pr_without_github_token_exits_two(self, demo, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+        res = self._run(demo, "--pr")
+        assert res.exit_code == 2
+        assert "GITHUB_TOKEN" in res.stdout
+
+    def test_pr_opens_a_pull_request_and_records_it_in_the_ledger(self, demo, monkeypatch):
+        from policyforge.ledger import Ledger
+        from policyforge.remediate.github import PullRequestResult
+
+        calls = []
+
+        def fake_open_fix_pr(**kw):
+            calls.append(kw)
+            return PullRequestResult(url="https://github.com/o/r/pull/1",
+                                     number=1, created=True)
+
+        monkeypatch.setattr("policyforge.remediate.github.open_fix_pr", fake_open_fix_pr)
+        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+
+        ledger_path = demo / "l.sqlite"
+        res = self._run(demo, "--pr", "--ledger", str(ledger_path))
+
+        assert res.exit_code == 0
+        assert "PR opened" in res.stdout
+        assert "https://github.com/o/r/pull/1" in res.stdout
+        assert "1 PR(s) opened" in res.stdout
+        assert len(calls) == 1
+        assert calls[0]["artifact"].id == "demo-policy"
+        assert calls[0]["rule"].id == "no-latest"
+        assert calls[0]["token"] == "tok123"
+
+        action = Ledger(ledger_path).open_actions()[0]
+        assert action["url"] == "https://github.com/o/r/pull/1"
+        assert action["kind"] == "pull_request"
+
+    def test_pr_is_not_reopened_once_already_claimed(self, demo, monkeypatch):
+        calls = []
+        monkeypatch.setattr("policyforge.remediate.github.open_fix_pr",
+                            lambda **kw: calls.append(kw))
+        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+
+        ledger_path = demo / "l.sqlite"
+        self._run(demo, "--pr", "--ledger", str(ledger_path))
+        assert len(calls) == 1
+
+        res = self._run(demo, "--pr", "--ledger", str(ledger_path))
+        assert "PR already opened for this fix" in res.stdout
+        assert "0 PR(s) opened" in res.stdout
+        assert len(calls) == 1, "must not call open_fix_pr again"
+
+    def test_pr_failure_is_reported_and_recorded_not_fatal(self, demo, monkeypatch):
+        from policyforge.ledger import Ledger
+        from policyforge.remediate.github import GitHubError
+
+        def fail(**kw):
+            raise GitHubError("401 bad credentials")
+
+        monkeypatch.setattr("policyforge.remediate.github.open_fix_pr", fail)
+        monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+        self._write_policy(demo, self._policy(
+            autofix={"type": "prefix_rewrite", "to": "mirror/"},
+            verify="grep -q mirror/ Dockerfile",
+        ))
+
+        ledger_path = demo / "l.sqlite"
+        res = self._run(demo, "--pr", "--ledger", str(ledger_path))
+
+        assert res.exit_code == 0
+        assert "could not open a PR" in res.stdout
+        assert "bad credentials" in res.stdout
+        assert "0 PR(s) opened" in res.stdout
+
+        action = Ledger(ledger_path).open_actions()
+        assert action == [], "a failed attempt must not be left looking open"
