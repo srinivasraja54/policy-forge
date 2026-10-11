@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "kind": "policy",
+  "id": "dockerfile-nonroot-user-2026-11-01",
+  "title": "Dockerfiles must declare a non-root USER before the final CMD/ENTRYPOINT",
+  "status": "proposed",
+  "severity": "blocking",
+  "source": {
+    "type": "slack",
+    "ref": "C0C84HES8PM/p1791667243886509",
+    "captured_at": "2026-10-10T21:20:43.886509Z",
+    "excerpt": "Heads up team \u2014 starting Nov 1, every Dockerfile needs to declare a non-root `USER` before the final `CMD`/`ENTRYPOINT`. Container Security flagged this in the latest audit: several images are still running as root by default. Please add a `USER` directive (not UID 0) to your Dockerfiles before the cutover \u2014 after Nov 1 this becomes a required check."
+  },
+  "rules": [
+    {
+      "id": "dockerfile-missing-user-directive",
+      "description": "Every Dockerfile must contain a USER directive so the image does not run as root by default. Flags Dockerfiles with no USER instruction at all.",
+      "detect": {
+        "type": "file_pattern",
+        "globs": [
+          "**/Dockerfile",
+          "**/Dockerfile.*",
+          "**/*.Dockerfile",
+          "**/*.dockerfile"
+        ],
+        "regex": "(?im)^[ \\t]*USER[ \\t]+\\S+",
+        "absent": true
+      },
+      "autofix": {
+        "type": "manual",
+        "instructions": "Add a non-root USER directive to this Dockerfile before the final CMD/ENTRYPOINT. Typical pattern:\n\n  RUN addgroup --system app && adduser --system --ingroup app app\n  # ... build/install steps that need root ...\n  USER app\n  ENTRYPOINT [\"...\"]\n\nEnsure any paths the process writes to (logs, caches, tmp dirs) are chowned to that user, and that no privileged port (<1024) is bound. Do not use UID 0. Rebuild and run the image locally to confirm it still starts."
+      },
+      "verify": "docker build -q -t policy-nonroot-check . && u=$(docker inspect --format '{{.Config.User}}' policy-nonroot-check) && [ -n \"$u\" ] && [ \"$u\" != \"root\" ] && [ \"${u%%:*}\" != \"0\" ]"
+    },
+    {
+      "id": "dockerfile-final-user-is-root",
+      "description": "The effective (last) USER directive in the Dockerfile must not be root or UID 0. A transient 'USER root' for install steps is allowed as long as a later USER switches to a non-root account.",
+      "detect": {
+        "type": "file_pattern",
+        "globs": [
+          "**/Dockerfile",
+          "**/Dockerfile.*",
+          "**/*.Dockerfile",
+          "**/*.dockerfile"
+        ],
+        "regex": "(?im)^[ \\t]*USER[ \\t]+(?:root|0)\\b(?![\\s\\S]*^[ \\t]*USER[ \\t]+(?!root\\b|0\\b)\\S)",
+        "absent": false
+      },
+      "autofix": {
+        "type": "manual",
+        "instructions": "The last USER directive in this Dockerfile resolves to root/UID 0, so the container runs as root. Create or reference a non-root account and switch to it after the privileged build steps:\n\n  RUN addgroup --system app && adduser --system --ingroup app app\n  USER app\n\nKeep any 'USER root' only around steps that genuinely require it, and switch back before the final CMD/ENTRYPOINT. Verify file ownership and port bindings after the change."
+      },
+      "verify": "docker build -q -t policy-nonroot-check . && u=$(docker inspect --format '{{.Config.User}}' policy-nonroot-check) && [ -n \"$u\" ] && [ \"$u\" != \"root\" ] && [ \"${u%%:*}\" != \"0\" ]"
+    }
+  ],
+  "deadline": "2026-11-01",
+  "actions": [],
+  "include_repos": [],
+  "exclude_repos": [],
+  "amendments": [],
+  "confidence": 0.72,
+  "created_at": "2026-10-11T10:11:48.872028Z",
+  "notes": "Two distinct obligations: (1) a USER directive must exist, (2) it must not be UID 0/root. Severity is blocking because the announcement states this 'becomes a required check' after the cutover; deadline 2026-11-01 is stated explicitly (year resolved from the 2026-10-10 posting date).\n\nLimitations worth reviewing:\n- The 'before the final CMD/ENTRYPOINT' ordering requirement is only partially expressible in a single regex. Rule 2 approximates the effective user by checking that no non-root USER appears after a root USER, but it cannot tell whether the last USER precedes the final CMD/ENTRYPOINT in multi-stage builds, nor which stage is the final one. A Dockerfile whose last stage inherits a non-root USER from a base image (no explicit USER anywhere) will be flagged by rule 1 as a false positive; the verify command distinguishes these cases by inspecting the built image's effective user.\n- Multi-stage builds where an early stage ends on 'USER root' and the final stage sets a non-root use\u2026"
+}
