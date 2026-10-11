@@ -137,4 +137,21 @@ against, read straight from the checkout at `repo/`. See
 how a fix is computed and verified before it ever reaches this step, and the
 module docstring in `src/policyforge/remediate/github.py` for how idempotency
 works (one branch per rule, force-pushed; the ledger's `actions` table is what
-stops a second run opening a second PR for the same fix).
+stops a second run opening a second PR for the same fix *within one checkout
+with a persistent ledger* -- a workflow whose runner is ephemeral, like
+GitHub Actions, gets a fresh empty ledger every run, so that fast path never
+engages there. It stays correct anyway: `open_fix_pr` checks GitHub itself for
+an existing open PR on the branch before creating one, so repeated runs
+update the same PR rather than opening a new one -- just without skipping the
+git work to get there. Worth tightening later (cache the ledger file between
+runs) but not a correctness problem today.
+
+This exact pattern -- `check` on push, and on failure `remediate --pr` -- is
+proven, not just documented: it's the live workflow running in
+`policy-forge-test-repo`, where a real push triggered a real failing `check`,
+which triggered a real `remediate --pr`, which opened a real draft PR, with no
+human in the loop. That repo also shows the one adaptation a real deployment
+needs beyond this template: its own small `test-registry/` committed
+alongside the code, rather than policy-forge's real demo registry checked out
+from a second repository -- use whichever matches where your org's actual
+compiled policy lives.
