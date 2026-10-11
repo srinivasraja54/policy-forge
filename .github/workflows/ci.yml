@@ -20,7 +20,14 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e ".[dev]"
+        # dev alone is not enough: test_slack.py and test_github.py import
+        # httpx at module level (it ships with both the slack and github
+        # extras), so collecting the full suite needs it present even though
+        # no test here ever makes a real network call. compile's anthropic
+        # SDK is not needed -- nothing imports it eagerly; AnthropicClient
+        # only imports it inside __init__, and every test either uses
+        # StubClient or monkeypatches AnthropicClient outright.
+        run: pip install -e ".[dev,slack,github]"
 
       - name: Test
         run: pytest -q --cov=policyforge --cov-report=term-missing
