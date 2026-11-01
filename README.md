@@ -189,7 +189,7 @@ _299 tests, 97% coverage. Reference: [artifact schema](docs/artifacts.md) · [co
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,slack,github]"   # slack/github pull in httpx: --slack, --pr, and the test suite need it
 
 policyctl compile --stub    # compile fixture announcements — no API key needed
 policyctl compile --slack   # compile real Slack channel history — needs SLACK_BOT_TOKEN
